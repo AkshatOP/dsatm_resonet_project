@@ -1,0 +1,150 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Base resets ─────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  background-color: #0f1117;
+  color: #e2e8f0;
+  font-family: 'Inter', system-ui, sans-serif;
+  overflow: hidden;
+}
+
+/* ── Leaflet map fill ────────────────────────────────────────── */
+.leaflet-container {
+  width: 100%;
+  height: 100%;
+  background: #0d1117;
+}
+
+/* ── Zone circle pulse animation ─────────────────────────────── */
+@keyframes pulse-ring {
+  0%   { transform: scale(1);   opacity: 1; }
+  70%  { transform: scale(2.2); opacity: 0; }
+  100% { transform: scale(2.2); opacity: 0; }
+}
+
+.zone-pulse {
+  animation: pulse-ring 0.8s ease-out;
+}
+
+/* ── Dispatch line dash animation ────────────────────────────── */
+@keyframes dash-move {
+  to { stroke-dashoffset: -20; }
+}
+
+.leaflet-aerial-line {
+  animation: dash-move 0.5s linear infinite;
+}
+
+/* ── Scrollbar styling ───────────────────────────────────────── */
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: #0f1117; }
+::-webkit-scrollbar-thumb { background: #2d3748; border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: #4a5568; }
+
+/* ── Typewriter cursor ───────────────────────────────────────── */
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0; }
+}
+.typewriter-cursor::after {
+  content: '▋';
+  animation: blink 1s step-end infinite;
+  color: #38bdf8;
+}
+
+/* ── Status indicator pulse ──────────────────────────────────── */
+@keyframes status-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(34,197,94,0.4); }
+  50%       { box-shadow: 0 0 0 6px rgba(34,197,94,0); }
+}
+.status-pulse {
+  animation: status-pulse 2s ease-in-out infinite;
+}
+
+/* ── Button shake during sim ─────────────────────────────────── */
+@keyframes sim-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(239,68,68,0.4); }
+  50%       { box-shadow: 0 0 0 8px rgba(239,68,68,0); }
+}
+.sim-pulse {
+  animation: sim-pulse 1s ease-in-out infinite;
+}
+
+/* ── Panel slide-in ──────────────────────────────────────────── */
+@keyframes slideUp {
+  from { transform: translateY(10px); opacity: 0; }
+  to   { transform: translateY(0);    opacity: 1; }
+}
+.slide-up {
+  animation: slideUp 0.25s ease-out;
+}
+
+/* ── Chat bubble fade-in ─────────────────────────────────────── */
+@keyframes fadein {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.animate-fadein {
+  animation: fadein 0.3s ease-out;
+}
+
+/* ── Zone line stagger (delay set via inline style) ──────────── */
+.zone-line {
+  opacity: 0;
+  animation: fadein 0.35s ease-out forwards;
+  /* animationDelay injected inline per element */
+}
+
+/* ── Tooltip z-index baseline ────────────────────────────────── */
+.group:hover .group-hover\:block { z-index: 9999; }
+
+/* ── Gini bar transition ─────────────────────────────────────── */
+.gini-bar-fill {
+  transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ── Zone colour transition (applied via JS style prop) ──────── */
+.zone-circle-path {
+  transition: fill 300ms ease, stroke 300ms ease;
+}
+
+/* ── Event log entry ─────────────────────────────────────────── */
+.log-entry {
+  animation: slideUp 0.2s ease-out;
+}
+
+/* ── Leaflet tooltip dark ────────────────────────────────────── */
+.leaflet-tooltip {
+  background: #1a2234 !important;
+  border: 1px solid #2d3748 !important;
+  color: #e2e8f0 !important;
+  font-family: 'Inter', sans-serif !important;
+  font-size: 12px !important;
+  border-radius: 6px !important;
+  padding: 4px 8px !important;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.5) !important;
+}
+.leaflet-tooltip::before {
+  border-top-color: #2d3748 !important;
+}
+
+/* ── Leaflet popup dark ──────────────────────────────────────── */
+.leaflet-popup-content-wrapper {
+  background: #1a2234 !important;
+  border: 1px solid #2d3748 !important;
+  color: #e2e8f0 !important;
+  border-radius: 10px !important;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.6) !important;
+}
+.leaflet-popup-tip {
+  background: #1a2234 !important;
+}
+.leaflet-popup-content { margin: 0 !important; }
