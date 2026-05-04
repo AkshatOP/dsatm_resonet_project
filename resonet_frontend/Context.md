@@ -116,3 +116,16 @@ AERIAL: dashed red/orange polyline, 2px, curved arc;
 
 ## Known Issues
 <!-- Append discovered bugs and workarounds here -->
+
+[2026-05-05 05:00] ZONAL MAP LEGEND —
+  - MapLegend.jsx: Added interactive "ZONES" section at bottom of legend panel.
+      Collapsible list (▾ toggle) shows all zones with ID + name.
+      Hovering a row → reveals estimated area coverage (km²) with slide-in animation.
+      Active zone highlighted with left accent border + glow dot in zone's severity colour.
+  - CityMap.jsx: Added hoveredZoneId state + onHoverZone callback wired to MapLegend.
+      Passes isHighlighted / isDimmed booleans down to each ZoneCircle.
+  - ZoneCircle.jsx: Added isHighlighted + isDimmed props.
+      isHighlighted → radius +4, fillOpacity=1, strokeWeight=3, dashed glow ring.
+      isDimmed → fillOpacity=0.25, strokeOpacity=0.2 for subtle focus effect.
+  - Area estimate: π·r² where r = 3.5 − density×2.3 (denser = smaller urban footprint).
+  VERIFIED: npm run build → 0 errors.

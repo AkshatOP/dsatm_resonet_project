@@ -1,17 +1,44 @@
 /**
  * ZoneCircle.jsx
- * Small dot marker for each zone — styled like image2 reference.
- * Radius = 5–8px (small, clustered). Color from classification.
- * Popup on click, tooltip on hover.
+ * Zone marker on the map.
+ * When an epicenter is active, color is determined by the zone center's
+ * distance from that epicenter (red → orange → yellow → green).
+ * Without an epicenter, falls back to the backend classification color.
  */
 
 import { CircleMarker, Popup, Tooltip } from 'react-leaflet';
 import { ZONE_COLOURS } from '../../constants/agentIcons';
 
-function classColour(classification) {
-  return ZONE_COLOURS[classification] ?? ZONE_COLOURS.DEFAULT;
+/* ── Distance-based color ─────────────────────────────────────────────
+ * Thresholds chosen so the 12 Bangalore-area zones spread naturally:
+ *   < 3 600 m  CRITICAL  (inside halo — Zone-D)
+ *   < 7 000 m  HIGH      (inner ring — A, B, G, H, I)
+ *   < 11 000 m LOW       (outer ring — C, E, J, K)
+ *   ≥ 11 000 m SAFE      (far zones  — F, L)
+ */
+function metersApart(lat1, lon1, lat2, lon2) {
+  const R     = 6371000;
+  const dLat  = (lat2 - lat1) * (Math.PI / 180);
+  const mLat  = ((lat1 + lat2) / 2) * (Math.PI / 180);
+  const dLon  = (lon2 - lon1) * (Math.PI / 180);
+  const dlat_m = dLat * R;
+  const dlon_m = dLon * R * Math.cos(mLat);
+  return Math.sqrt(dlat_m * dlat_m + dlon_m * dlon_m);
 }
 
+function quakeClass(lat, lon, epicenter) {
+  const d = metersApart(lat, lon, epicenter.lat, epicenter.lon);
+  if (d < 3600)  return 'CRITICAL';
+  if (d < 7000)  return 'HIGH';
+  if (d < 11000) return 'LOW';
+  return 'SAFE';
+}
+
+function classColour(cls) {
+  return ZONE_COLOURS[cls] ?? ZONE_COLOURS.DEFAULT;
+}
+
+/* ── Popup sub-components ─────────────────────────────────────────── */
 function Bar({ value, color }) {
   const pct = Math.round((value ?? 0) * 100);
   return (
@@ -31,7 +58,8 @@ const CLS_COLOURS = {
   SAFE:     'bg-green-600',
 };
 
-export default function ZoneCircle({ zone }) {
+/* ── Component ────────────────────────────────────────────────────── */
+export default function ZoneCircle({ zone, epicenter, isHighlighted = false, isDimmed = false }) {
   const {
     id, name, lat, lon,
     population_density = 0.5,
@@ -42,31 +70,62 @@ export default function ZoneCircle({ zone }) {
     road_blocked,
   } = zone;
 
-  const color = classColour(classification);
+  // Distance-based classification overrides backend when earthquake is active
+  const effectiveClass = epicenter ? quakeClass(lat, lon, epicenter) : classification;
+  const color          = classColour(effectiveClass);
+  const baseRadius     = Math.max(5, Math.min(9, (population_density ?? 0.5) * 10));
+  const radius         = isHighlighted ? baseRadius + 4 : baseRadius;
+  const isCritical     = effectiveClass === 'CRITICAL';
 
-  // Small dots — radius 5 to 9 based on density, like image2
-  const radius = Math.max(5, Math.min(9, (population_density ?? 0.5) * 10));
+  // Highlight: brighter, heavier ring + glow effect via weight + opacity
+  // Dimmed: subtle fade so the highlighted zone pops
+  const fillOpacity = isDimmed
+    ? 0.25
+    : isHighlighted
+      ? 1
+      : isCritical ? 0.92 : 0.78;
 
-  // Epicenter-style: CRITICAL dots get a subtle glow via higher opacity
-  const isCritical = classification === 'CRITICAL';
+  const strokeOpacity = isDimmed
+    ? 0.2
+    : isHighlighted
+      ? 1
+      : isCritical ? 1 : 0.6;
+
+  const strokeWeight = isHighlighted ? 3 : isCritical ? 1.5 : 0.5;
 
   return (
+    <>
+      {/* Subtle glow ring rendered beneath the main circle on highlight */}
+      {isHighlighted && (
+        <CircleMarker
+          center={[lat, lon]}
+          radius={radius + 6}
+          pathOptions={{
+            color:       color,
+            fillColor:   color,
+            fillOpacity: 0.12,
+            weight:      1,
+            opacity:     0.5,
+            dashArray:   '3 3',
+          }}
+          interactive={false}
+        />
+      )}
     <CircleMarker
       center={[lat, lon]}
       radius={radius}
       pathOptions={{
-        color:       isCritical ? color : color,
+        color:       color,
         fillColor:   color,
-        fillOpacity: isCritical ? 0.92 : 0.78,
-        weight:      isCritical ? 1.5  : 0.5,
-        opacity:     isCritical ? 1    : 0.6,
-        className:   'zone-circle-path',
+        fillOpacity: fillOpacity,
+        weight:      strokeWeight,
+        opacity:     strokeOpacity,
       }}
     >
       <Tooltip sticky>
         <span className="font-semibold">{name}</span>
-        {classification && (
-          <span className="ml-2 text-xs opacity-75">({classification})</span>
+        {effectiveClass && (
+          <span className="ml-2 text-xs opacity-75">({effectiveClass})</span>
         )}
       </Tooltip>
 
@@ -77,9 +136,9 @@ export default function ZoneCircle({ zone }) {
             <span className="text-[10px] text-gray-500">{id}</span>
           </div>
 
-          {classification && (
-            <span className={`inline-block px-2 py-0.5 rounded text-xs font-semibold text-white ${CLS_COLOURS[classification] ?? 'bg-gray-600'}`}>
-              {classification}
+          {effectiveClass && (
+            <span className={`inline-block px-2 py-0.5 rounded text-xs font-semibold text-white ${CLS_COLOURS[effectiveClass] ?? 'bg-gray-600'}`}>
+              {effectiveClass}
             </span>
           )}
 
@@ -112,5 +171,6 @@ export default function ZoneCircle({ zone }) {
         </div>
       </Popup>
     </CircleMarker>
+    </>
   );
 }

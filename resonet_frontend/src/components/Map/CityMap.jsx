@@ -4,10 +4,12 @@
  * Render order (bottom → top):
  *   1. Earthquake halo  — large dashed circle at epicenter
  *   2. Building clusters — density dots per zone
- *   3. Zone circles     — interactive zone markers
+ *   3. Zone circles     — interactive zone markers (subtly highlighted on legend hover)
  *   4. Infra markers    — hospital / fire / rescue icons
+ *   5. MapLegend        — interactive zone legend with hover highlight
  */
 
+import { useState }              from 'react';
 import { MapContainer, TileLayer } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import ZoneCircle      from './ZoneCircle';
@@ -23,6 +25,8 @@ const CENTER = [12.9716, 77.5946];
 const ZOOM   = 13;
 
 export default function CityMap({ zones, epicenter }) {
+  const [hoveredZoneId, setHoveredZoneId] = useState(null);
+
   return (
     <div className="relative w-full h-full">
       <MapContainer
@@ -37,21 +41,31 @@ export default function CityMap({ zones, epicenter }) {
         {/* Earthquake halo — rendered first so everything else sits on top */}
         <EarthquakeHalo epicenter={epicenter} />
 
-        {/* Building density clusters */}
+        {/* Building density clusters — each dot colored by its distance to epicenter */}
         {zones.map((zone) => (
-          <BuildingCluster key={`cluster-${zone.id}`} zone={zone} />
+          <BuildingCluster key={`cluster-${zone.id}`} zone={zone} epicenter={epicenter} />
         ))}
 
-        {/* Zone circle markers — main interactive elements */}
+        {/* Zone circle markers — subtle highlight when hoveredZoneId matches */}
         {zones.map((zone) => (
-          <ZoneCircle key={zone.id} zone={zone} />
+          <ZoneCircle
+            key={zone.id}
+            zone={zone}
+            epicenter={epicenter}
+            isHighlighted={hoveredZoneId === zone.id}
+            isDimmed={hoveredZoneId !== null && hoveredZoneId !== zone.id}
+          />
         ))}
 
         {/* Infrastructure icons — placed well outside the zone cluster */}
         <InfraMarkers />
       </MapContainer>
 
-      <MapLegend />
+      {/* Zone legend — interactive, collapsible zone list */}
+      <MapLegend
+        zones={zones}
+        onHoverZone={setHoveredZoneId}
+      />
     </div>
   );
 }
