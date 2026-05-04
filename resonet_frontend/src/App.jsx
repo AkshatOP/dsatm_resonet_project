@@ -58,6 +58,10 @@ export default function App() {
   const zoneBatchRef      = useRef([]);
   const zoneBatchTimerRef = useRef(null);
 
+  // Power batch buffer — collects power status changes, flushes a power_agent chat msg
+  const powerBatchRef      = useRef({ off: [], on: [] });
+  const powerBatchTimerRef = useRef(null);
+
   const { triggerEarthquake, resetSystem, isSimulating, lastEvent } = useSimulation();
 
   // Derive epicenter from the POST /simulate response — cleared to null on reset
@@ -92,6 +96,22 @@ export default function App() {
     pushMsg(makeMsg('zone_group', 'zone_monitor', '', null, { groups }));
   }, [pushMsg]);
 
+  /* ── Power batch flush — fires after all zone_update events settle ── */
+  const flushPowerBatch = useCallback(() => {
+    const { off, on } = powerBatchRef.current;
+    powerBatchRef.current = { off: [], on: [] };
+    if (off.length === 0) return;
+
+    const offList  = off.join(', ');
+    const onCount  = on.length;
+    pushMsg(makeMsg(
+      'award', 'power_agent',
+      `Grid failure confirmed — ${off.length} sector${off.length > 1 ? 's' : ''} offline: ${offList}.`,
+      `Emergency load shedding active. ${onCount} sector${onCount !== 1 ? 's' : ''} maintaining stable supply.`,
+      { badge: 'OFFLINE' },
+    ));
+  }, [pushMsg]);
+
   /* ── WebSocket handlers ───────────────────────────────────────── */
   const onZoneUpdate = useCallback((payload) => {
     const { zone_id, lat, lon, classification, severity_score,
@@ -108,7 +128,17 @@ export default function App() {
         : z
     ));
 
-    // Buffer for grouped chat message (only notable zones)
+    // Track power status changes for the power_agent chat message
+    if (power_status === false && !powerBatchRef.current.off.includes(zone_id)) {
+      powerBatchRef.current.off.push(zone_id);
+    } else if (power_status === true && !powerBatchRef.current.on.includes(zone_id)) {
+      powerBatchRef.current.on.push(zone_id);
+    }
+    clearTimeout(powerBatchTimerRef.current);
+    // Flush slightly after zone batch (900 ms) so power msg appears after zone alert
+    powerBatchTimerRef.current = setTimeout(flushPowerBatch, 900);
+
+    // Buffer for grouped zone classification chat message
     if (['CRITICAL', 'HIGH', 'LOW'].includes(classification)) {
       const existingIdx = zoneBatchRef.current.findIndex((z) => z.zone_id === zone_id);
       const updateData = { zone_id, classification, power_status, road_blocked, has_critical_infra };
@@ -120,7 +150,7 @@ export default function App() {
       clearTimeout(zoneBatchTimerRef.current);
       zoneBatchTimerRef.current = setTimeout(flushZoneBatch, 700);
     }
-  }, [flushZoneBatch]);
+  }, [flushZoneBatch, flushPowerBatch]);
 
   const onNegotiation = useCallback((payload) => {
     const { decision_id, resource_type, requester, winner,
@@ -222,12 +252,25 @@ export default function App() {
     bootstrap();
   }, []);
 
+  /* ── Trigger — push immediate power_agent alert, then fire simulation ── */
+  const handleTrigger = useCallback(async () => {
+    pushMsg(makeMsg(
+      'request', 'power_agent',
+      'Seismic activity detected. Initiating emergency power grid monitoring across all sectors.',
+      'Scanning grid integrity — standby for sector status report.',
+    ));
+    await triggerEarthquake();
+  }, [triggerEarthquake, pushMsg]);
+
   /* ── Reset ────────────────────────────────────────────────────── */
   const handleReset = useCallback(() => {
     resetSystem(() => {
       // Clear zone batch
       clearTimeout(zoneBatchTimerRef.current);
       zoneBatchRef.current = [];
+      // Clear power batch
+      clearTimeout(powerBatchTimerRef.current);
+      powerBatchRef.current = { off: [], on: [] };
       // Clear dedup sets
       seenDecisions.current.clear();
       decisionsRef.current.clear();
@@ -284,7 +327,7 @@ export default function App() {
         {/* Sidebar */}
         <aside className="w-72 shrink-0 bg-panel-surface border-r border-panel-border flex flex-col overflow-hidden">
           <div className="shrink-0 p-3 border-b border-panel-border">
-            <Controls isSimulating={isSimulating} onTrigger={triggerEarthquake} onReset={handleReset} />
+            <Controls isSimulating={isSimulating} onTrigger={handleTrigger} onReset={handleReset} />
           </div>
           <div className="flex-[3] min-h-0 flex flex-col overflow-hidden">
             <AgentChat messages={messages} />

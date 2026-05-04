@@ -3,10 +3,10 @@
  * Main Leaflet map wrapper.
  * Render order (bottom → top):
  *   1. Earthquake halo  — large dashed circle at epicenter
- *   2. Building clusters — density dots per zone
- *   3. Zone circles     — interactive zone markers (subtly highlighted on legend hover)
- *   4. Infra markers    — hospital / fire / rescue icons
- *   5. MapLegend        — interactive zone legend with hover highlight
+ *   2. Building clusters — density dots per zone (colored by distance)
+ *   3. Power overlay    — blue city-light dots, hidden on power-off zones
+ *   4. Zone circles     — interactive zone markers
+ *   5. Infra markers    — hospital / fire / rescue icons
  */
 
 import { useState }              from 'react';
@@ -14,6 +14,7 @@ import { MapContainer, TileLayer } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import ZoneCircle      from './ZoneCircle';
 import BuildingCluster from './BuildingCluster';
+import PowerOverlay    from './PowerOverlay';
 import InfraMarkers    from './InfraMarker';
 import EarthquakeHalo  from './EarthquakeHalo';
 import MapLegend       from './MapLegend';
@@ -45,6 +46,9 @@ export default function CityMap({ zones, epicenter }) {
         {zones.map((zone) => (
           <BuildingCluster key={`cluster-${zone.id}`} zone={zone} epicenter={epicenter} />
         ))}
+
+        {/* Power overlay — blue dots for zones outside the 7 km impact radius */}
+        <PowerOverlay zones={zones} epicenter={epicenter} />
 
         {/* Zone circle markers — subtle highlight when hoveredZoneId matches */}
         {zones.map((zone) => (
