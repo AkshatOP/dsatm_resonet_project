@@ -1,7 +1,7 @@
 /** API and WebSocket URL constants — never inline these in components. */
 
-export const BASE_URL = 'http://localhost:8000';
-export const WS_URL   = 'ws://localhost:8000/ws';
+export const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+export const WS_URL   = import.meta.env.VITE_WS_URL ||  'ws://localhost:8000/ws';
 
 export const ENDPOINTS = {
   health:       `${BASE_URL}/health`,
