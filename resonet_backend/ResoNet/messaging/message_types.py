@@ -19,6 +19,19 @@ class EarthquakeEvent:
     epicenter_lon: float
     magnitude: float
     event_id: str
+    calamity_type: str = "EARTHQUAKE"
+    timestamp: str = field(default_factory=_now_iso)
+
+
+@dataclass
+class FireEvent:
+    """Fired when a fire is simulated; consumed by SensingAgent."""
+    epicenter_lat: float
+    epicenter_lon: float
+    intensity: float          # analogous to magnitude — controls radius/severity
+    event_id: str
+    radius_km: float = 1.5   # damage drops to zero at this distance
+    calamity_type: str = "FIRE"
     timestamp: str = field(default_factory=_now_iso)
 
 

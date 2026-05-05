@@ -10,12 +10,21 @@ import { CircleMarker, Popup, Tooltip } from 'react-leaflet';
 import { ZONE_COLOURS } from '../../constants/agentIcons';
 
 /* ── Distance-based color ─────────────────────────────────────────────
- * Thresholds chosen so the 12 Bangalore-area zones spread naturally:
- *   < 3 600 m  CRITICAL  (inside halo — Zone-D)
- *   < 7 000 m  HIGH      (inner ring — A, B, G, H, I)
- *   < 11 000 m LOW       (outer ring — C, E, J, K)
- *   ≥ 11 000 m SAFE      (far zones  — F, L)
+ * Earthquake thresholds (unchanged):
+ *   < 3 600 m  CRITICAL  (epicenter zone)
+ *   < 7 000 m  HIGH      (inner ring)
+ *   < 11 000 m LOW       (outer ring)
+ *   ≥ 11 000 m SAFE
+ *
+ * Fire thresholds (tight — only epicenter is CRITICAL, no HIGH):
+ *   <   500 m  CRITICAL  (epicenter zone only)
+ *   <   500 m  HIGH      (zero-width band → impossible)
+ *   < 2 500 m  LOW       (immediately adjacent zones: B, A, H, C)
+ *   ≥ 2 500 m  SAFE
  */
+const EQ_BANDS_M   = [3_600, 7_000, 11_000];
+const FIRE_BANDS_M = [500, 500, 2_500];   // no HIGH for fires
+
 function metersApart(lat1, lon1, lat2, lon2) {
   const R     = 6371000;
   const dLat  = (lat2 - lat1) * (Math.PI / 180);
@@ -27,10 +36,11 @@ function metersApart(lat1, lon1, lat2, lon2) {
 }
 
 function quakeClass(lat, lon, epicenter) {
-  const d = metersApart(lat, lon, epicenter.lat, epicenter.lon);
-  if (d < 3600)  return 'CRITICAL';
-  if (d < 7000)  return 'HIGH';
-  if (d < 11000) return 'LOW';
+  const d     = metersApart(lat, lon, epicenter.lat, epicenter.lon);
+  const bands = epicenter.calamity_type === 'FIRE' ? FIRE_BANDS_M : EQ_BANDS_M;
+  if (d < bands[0]) return 'CRITICAL';
+  if (d < bands[1]) return 'HIGH';
+  if (d < bands[2]) return 'LOW';
   return 'SAFE';
 }
 

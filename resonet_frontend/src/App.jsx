@@ -36,6 +36,15 @@ const INITIAL_POOLS = {
   ndrf_agent:     { heavy_equipment: 15, personnel: 120, aerial_units: 4 },
 };
 
+/* ── Haversine approx (flat-earth OK for < 50 km) ────────────── */
+function metersApart(lat1, lon1, lat2, lon2) {
+  const R    = 6371000;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const mLat = ((lat1 + lat2) / 2) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  return Math.sqrt((dLat * R) ** 2 + (dLon * R * Math.cos(mLat)) ** 2);
+}
+
 /* ── Chat message factory ─────────────────────────────────────── */
 function makeMsg(type, agentId, text, subtext = null, extras = {}) {
   return {
@@ -67,16 +76,32 @@ export default function App() {
   const zoneBatchRef      = useRef([]);
   const zoneBatchTimerRef = useRef(null);
 
-  // Power batch buffer — collects power status changes, flushes a power_agent chat msg
-  const powerBatchRef      = useRef({ off: [], on: [] });
+  // Power batch — stores { id, lat, lon } for every zone the backend marks power_off.
+  // Filtered by distance at flush time so the message matches the map exactly.
+  const powerBatchRef      = useRef([]);
   const powerBatchTimerRef = useRef(null);
 
-  const { triggerEarthquake, resetSystem, isSimulating, lastEvent } = useSimulation();
+  // Mirror of the epicenter state in a ref so async callbacks can read it without
+  // being in the dependency chain of useCallback.
+  const epicenterRef = useRef(null);
+
+  const { triggerEarthquake, triggerFire, resetSystem, isSimulating, lastEvent } = useSimulation();
 
   // Derive epicenter from the POST /simulate response — cleared to null on reset
+  // Include calamity_type and radius_km so EmergencyRoutes and EarthquakeHalo
+  // can render the correct danger-zone size for fire vs earthquake.
   const epicenter = lastEvent?.epicenter_lat != null
-    ? { lat: lastEvent.epicenter_lat, lon: lastEvent.epicenter_lon, magnitude: lastEvent.magnitude }
+    ? {
+        lat: lastEvent.epicenter_lat,
+        lon: lastEvent.epicenter_lon,
+        magnitude: lastEvent.magnitude,
+        calamity_type: lastEvent.calamity_type ?? 'EARTHQUAKE',
+        radius_km: lastEvent.radius_km ?? null,
+      }
     : null;
+  // Keep ref in sync with state so flush callbacks can read it without being
+  // added to useCallback dependency arrays (refs are stable objects).
+  epicenterRef.current = epicenter;
 
   const pushMsg = useCallback((msg) => {
     setMessages((prev) => [...prev, msg].slice(-MAX_MSGS));
@@ -107,15 +132,26 @@ export default function App() {
 
   /* ── Power batch flush — fires after all zone_update events settle ── */
   const flushPowerBatch = useCallback(() => {
-    const { off } = powerBatchRef.current;
-    powerBatchRef.current = { off: [], on: [] };
+    const collected = powerBatchRef.current;
+    powerBatchRef.current = [];
+    if (collected.length === 0) return;
+
+    const epi = epicenterRef.current;
+
+    // Filter to only zones within 7 km of the epicenter (CRITICAL + HIGH ring).
+    // Zones further away (LOW + SAFE) keep their power — matches PowerOverlay map.
+    // If epicenter isn't known yet, nothing is reported (very unlikely edge-case).
+    const off = epi
+      ? collected.filter((z) => metersApart(z.lat, z.lon, epi.lat, epi.lon) < 7000)
+      : [];
+
     if (off.length === 0) return;
 
-    // Stable count = total city zones minus the impact zones that lost power
+    const offIds      = off.map((z) => z.id).join(', ');
     const stableCount = 12 - off.length;
     pushMsg(makeMsg(
       'award', 'power_agent',
-      `Grid failure confirmed — ${off.length} sector${off.length > 1 ? 's' : ''} offline: ${off.join(', ')}.`,
+      `Grid failure confirmed — ${off.length} sector${off.length > 1 ? 's' : ''} offline: ${offIds}.`,
       `Emergency load shedding active. ${stableCount} sector${stableCount !== 1 ? 's' : ''} maintaining stable supply.`,
       { badge: 'OFFLINE' },
     ));
@@ -137,13 +173,14 @@ export default function App() {
         : z
     ));
 
-    // Track power losses only for zones in the earthquake impact area (CRITICAL/HIGH).
-    // The backend sends power_status:false for ALL zones, so we filter by classification
-    // to match the 7 km power-loss radius used by PowerOverlay on the map.
-    if (power_status === false &&
-        ['CRITICAL', 'HIGH'].includes(classification) &&
-        !powerBatchRef.current.off.includes(zone_id)) {
-      powerBatchRef.current.off.push(zone_id);
+    // Collect every zone the backend reports as powered-off.
+    // Distance filtering happens at flush time (in flushPowerBatch) using the epicenter,
+    // so the chat message always matches exactly what PowerOverlay shows on the map.
+    if (power_status === false) {
+      const alreadyTracked = powerBatchRef.current.some((z) => z.id === zone_id);
+      if (!alreadyTracked) {
+        powerBatchRef.current.push({ id: zone_id, lat: lat ?? 0, lon: lon ?? 0 });
+      }
     }
     clearTimeout(powerBatchTimerRef.current);
     // Flush slightly after zone batch (900 ms) so power msg appears after zone alert
@@ -324,6 +361,15 @@ export default function App() {
     await triggerEarthquake();
   }, [triggerEarthquake, pushMsg]);
 
+  const handleTriggerFire = useCallback(async () => {
+    pushMsg(makeMsg(
+      'request', 'fire_agent',
+      '🔥 Fire outbreak reported in Zone-I (Mahalakshmi Layout). Dispatching emergency units.',
+      'Alerting Fire, Police, and Ambulance — initiating response protocol.',
+    ));
+    await triggerFire();
+  }, [triggerFire, pushMsg]);
+
   /* ── Reset ────────────────────────────────────────────────────── */
   const handleReset = useCallback(() => {
     resetSystem(() => {
@@ -332,7 +378,7 @@ export default function App() {
       zoneBatchRef.current = [];
       // Clear power batch
       clearTimeout(powerBatchTimerRef.current);
-      powerBatchRef.current = { off: [], on: [] };
+      powerBatchRef.current = [];
       // Clear dedup sets
       seenDecisions.current.clear();
       decisionsRef.current.clear();
@@ -386,7 +432,7 @@ export default function App() {
         {/* Sidebar */}
         <aside className="w-72 shrink-0 bg-panel-surface border-r border-panel-border flex flex-col overflow-hidden">
           <div className="shrink-0 p-3 border-b border-panel-border">
-            <Controls isSimulating={isSimulating} onTrigger={handleTrigger} onReset={handleReset} />
+            <Controls isSimulating={isSimulating} onTrigger={handleTrigger} onTriggerFire={handleTriggerFire} onReset={handleReset} />
           </div>
           <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
             <AgentChat messages={messages} />

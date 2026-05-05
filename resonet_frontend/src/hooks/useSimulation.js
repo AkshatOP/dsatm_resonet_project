@@ -1,7 +1,7 @@
 /**
  * useSimulation.js
  * Handles trigger and reset API calls.
- * Returns { triggerEarthquake, resetSystem, isSimulating }
+ * Returns { triggerEarthquake, triggerFire, resetSystem, isSimulating }
  */
 
 import { useState, useCallback } from 'react';
@@ -29,6 +29,22 @@ export function useSimulation() {
     }
   }, [isSimulating]);
 
+  const triggerFire = useCallback(async () => {
+    if (isSimulating) return;
+    setIsSimulating(true);
+    try {
+      const res  = await fetch(ENDPOINTS.simulateFire, { method: 'POST' });
+      const data = await res.json();
+      setLastEvent(data);
+      console.log('[SIM] Triggered fire:', data);
+      setTimeout(() => setIsSimulating(false), 15000);
+      return data;
+    } catch (err) {
+      console.error('[SIM] Fire trigger failed:', err);
+      setIsSimulating(false);
+    }
+  }, [isSimulating]);
+
   const resetSystem = useCallback(async (onReset) => {
     try {
       const res  = await fetch(ENDPOINTS.reset, { method: 'POST' });
@@ -43,5 +59,6 @@ export function useSimulation() {
     }
   }, []);
 
-  return { triggerEarthquake, resetSystem, isSimulating, lastEvent };
+  return { triggerEarthquake, triggerFire, resetSystem, isSimulating, lastEvent };
 }
+

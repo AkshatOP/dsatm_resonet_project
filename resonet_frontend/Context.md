@@ -17,6 +17,7 @@ CORS:      open — call the backend directly from the browser, no proxy needed
 - GET  /state                                       → { agents, zones, recent_decisions }
 - GET  /decisions?limit=N                           → { decisions: [...] }
 - POST /simulate/scenario/hospital-earthquake       → { scenario, event_id, magnitude, epicenter_lat, epicenter_lon }
+- POST /simulate/scenario/fire                      → { scenario, event_id, calamity_type:"FIRE", intensity, radius_km, epicenter_lat, epicenter_lon }
 - POST /simulate/reset                              → { status, message }
 - POST /agents/{agent_id}/priority  body:{weight}  → adjusts priority weight
 
@@ -24,7 +25,8 @@ CORS:      open — call the backend directly from the browser, no proxy needed
 All events: { event_type, payload, timestamp }
 
 zone_update:   zone_id, severity_score, classification (SAFE/LOW/HIGH/CRITICAL),
-               population_density, has_critical_infra, road_blocked, power_status, lat, lon
+               population_density, has_critical_infra, road_blocked, power_status,
+               lat, lon, calamity_type ("EARTHQUAKE"|"FIRE")
 
 negotiation:   decision_id, rfp_id, resource_type, requester, winner,
                amount_awarded, gini_before, gini_after, bids_count
@@ -43,6 +45,19 @@ LOW      → #eab308
 HIGH     → #f97316
 CRITICAL → #ef4444
 Default  → #6b7280
+
+## Distance-Band Classification (source of truth)
+Both the Map (ZoneCircle.jsx) and the Backend (SensingAgent) now use identical
+distance-from-epicenter thresholds. These MUST stay in sync.
+
+Earthquake bands (metres):  CRITICAL < 3 600 | HIGH < 7 000 | LOW < 11 000 | SAFE ≥ 11 000
+Fire bands (metres):        CRITICAL <   500 | HIGH: IMPOSSIBLE (zero-width) | LOW < 2 500 | SAFE ≥ 2 500
+                            → Only the epicenter zone can ever be CRITICAL for fires.
+                            → Nearby zones (B, A, H, C within 2.5km) are LOW; everything else SAFE.
+
+Frontend mirror: EmergencyRoutes.jsx — EQ_BANDS_M / FIRE_BANDS_M + effectiveClass()
+Backend mirror:  sensing_agent.py   — _EQ_BANDS_M / _FIRE_BANDS_M + _distance_class()
+Backend mirror:  ZoneCircle.jsx     — quakeClass() uses same 3600/7000/11000 values
 
 ## Dispatch Line Rules
 LAND:   solid white/blue polyline, 3px, uses path waypoints
@@ -114,9 +129,6 @@ AERIAL: dashed red/orange polyline, 2px, curved arc;
     zone_update events by zone_id before pushing, so StrictMode double-fires are merged.
   VERIFIED: App.jsx builds cleanly. Backend needs a restart to pick up the 49 zones.
 
-## Known Issues
-<!-- Append discovered bugs and workarounds here -->
-
 [2026-05-05 05:00] ZONAL MAP LEGEND —
   - MapLegend.jsx: Added interactive "ZONES" section at bottom of legend panel.
       Collapsible list (▾ toggle) shows all zones with ID + name.
@@ -146,3 +158,64 @@ AERIAL: dashed red/orange polyline, 2px, curved arc;
   - index.css: Added .emergency-routes-eta panel + all sub-element styles. fadeInDown anim.
   VERIFIED: npm run build → 0 errors. 74 modules.
 
+[2026-05-05 07:15] FIRE CALAMITY SIMULATION —
+  Backend:
+  - messaging/message_types.py: Added FireEvent dataclass (intensity, radius_km, calamity_type="FIRE").
+      EarthquakeEvent got calamity_type="EARTHQUAKE" field for parity.
+  - simulation/fire_simulator.py: New. Steep falloff: severity = max(0, 1 − dist_km/radius_km).
+      Default radius 1.5km → only epicenter zone CRITICAL, adjacent zones LOW, rest SAFE.
+  - config.py: Added DEMO_FIRE seed (Zone-I / Mahalakshmi Layout: 13.0051, 77.5591).
+  - agents/sensing_agent.py: Added process_fire_event(). Refactored shared _common_pipeline().
+      Fire dispatch: fire_agent + police_agent + hospital_agent to all CRITICAL/HIGH zones.
+      zone_update WS payload now includes calamity_type field.
+  - api/routes.py: Added POST /simulate/scenario/fire. Added FireBody pydantic model.
+      Reset endpoint now clears police_agent.crowd_control_zones.
+  Frontend:
+  - constants/api.js: Added simulateFire endpoint.
+  - hooks/useSimulation.js: Added triggerFire() method.
+  - Sidebar/Controls.jsx: Added 🔥 "Simulate Fire (Zone-I)" button (orange theme).
+  - Map/EmergencyRoutes.jsx: Added police responder. Fire danger zone = 500m circle.
+  - Map/EarthquakeHalo.jsx: Dynamic radius — fire 500m tight, earthquake mag-based.
+  - App.jsx: Wired triggerFire + calamity_type/radius_km on epicenter object.
+  VERIFIED: npm run build → 0 errors. Fire at Zone-I: only Zone-I=CRITICAL, rest SAFE.
+
+[2026-05-05 08:00] CLASSIFICATION CONSISTENCY FIX — CRITICAL BUG —
+  ROOT CAUSE: ZoneCircle.jsx used distance-based classification (CRITICAL<3600m, HIGH<7000m,
+  LOW<11000m) while the backend ZoneClassifier used a weighted score (0.4×severity +
+  0.3×population + 0.3×infra). These produced completely different results for 9/12 zones.
+  FIX:
+  - backend/agents/sensing_agent.py: _common_pipeline() now classifies zones by DISTANCE from
+      epicenter using haversine, matching ZoneCircle.jsx bands exactly.
+      _EQ_BANDS_M = (3600, 7000, 11000) | _FIRE_BANDS_M = (500, 500, 2500)
+      Rule-based ZoneClassifier still runs for DEBUG logging only (no longer authoritative).
+  - frontend/Map/EmergencyRoutes.jsx: getTargetZones() now computes effectiveClass() per zone
+      using the same distance bands, not zone.classification from WS payload.
+  - backend/simulation/earthquake.py: Damage threshold raised 0.6 → 0.85.
+  RESULT: All 12 zones match 100% between map and backend. Validated with script.
+  VERIFIED: npm run build → 0 errors. 74 modules.
+  ⚠️ INVARIANT: EQ_BANDS_M values must stay identical in:
+     ZoneCircle.jsx quakeClass() | EmergencyRoutes.jsx EQ_BANDS_M | sensing_agent.py _EQ_BANDS_M
+
+[2026-05-05 08:25] FIRE CLASSIFICATION TIGHTENING —
+  PROBLEM: Fire simulation was incorrectly marking Yeshwanthpur and other nearby zones CRITICAL
+  because ZoneCircle.jsx was still using earthquake bands for fire, and FIRE_BANDS allowed HIGH.
+  User requirement: ONLY Zone-I (Mahalakshmi Layout) = CRITICAL, adjacent zones = LOW (no HIGH).
+  CHANGES:
+  - Map/ZoneCircle.jsx: quakeClass() now reads epicenter.calamity_type. If FIRE, uses
+      FIRE_BANDS_M=[500,500,2500] instead of EQ_BANDS_M=[3600,7000,11000].
+      The zero-width HIGH band (500==500) means no zone can ever be HIGH in a fire.
+  - agents/sensing_agent.py: _FIRE_BANDS_M updated (500,500,2500).
+  - Map/EmergencyRoutes.jsx: FIRE_BANDS_M updated [500,500,2500].
+  - config.py: DEMO_FIRE radius_km reduced 1.5 → 0.4 (tight 400m visual circle).
+  - Map/EarthquakeHalo.jsx: Fire halo fixed at 400m radius (not radius_km-based),
+      mainFillOpacity 0.18 (more visible), glowExtra 100m (tighter).
+  RESULT (validated):
+      Zone-I   0m      → CRITICAL ✓
+      Zone-B   1302m   → LOW ✓
+      Zone-A   1558m   → LOW ✓
+      Zone-H   2330m   → LOW ✓
+      Zone-C   2358m   → LOW ✓
+      Zone-D   5142m   → SAFE ✓  (was wrongly HIGH before)
+      All others       → SAFE ✓
+  VERIFIED: npm run build → 0 errors. 74 modules.
+  ⚠️ Restart backend to pick up config.py + sensing_agent.py changes.

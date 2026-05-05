@@ -90,7 +90,10 @@ class EarthquakeSimulator:
             road_blocked = False
             power_status = True
 
-            if severity > 0.6:
+            # Only CRITICAL-radius zones (severity > 0.85 for linear formula at M7)
+            # get road blocks and power cuts. This aligns with the distance bands
+            # shown on the map (ZoneCircle.jsx: CRITICAL < 3 600 m).
+            if severity > 0.85:
                 city_model.block_road(zone_id)
                 road_blocked = True
                 city_model.set_zone_power(zone_id, False)

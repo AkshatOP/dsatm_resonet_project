@@ -4,11 +4,12 @@ export const BASE_URL = 'http://localhost:8000';
 export const WS_URL   = 'ws://localhost:8000/ws';
 
 export const ENDPOINTS = {
-  health:      `${BASE_URL}/health`,
-  zones:       `${BASE_URL}/zones`,
-  state:       `${BASE_URL}/state`,
-  decisions:   (limit = 20) => `${BASE_URL}/decisions?limit=${limit}`,
-  simulate:    `${BASE_URL}/simulate/scenario/hospital-earthquake`,
-  reset:       `${BASE_URL}/simulate/reset`,
-  agentPrio:   (id) => `${BASE_URL}/agents/${id}/priority`,
+  health:       `${BASE_URL}/health`,
+  zones:        `${BASE_URL}/zones`,
+  state:        `${BASE_URL}/state`,
+  decisions:    (limit = 20) => `${BASE_URL}/decisions?limit=${limit}`,
+  simulate:     `${BASE_URL}/simulate/scenario/hospital-earthquake`,
+  simulateFire: `${BASE_URL}/simulate/scenario/fire`,
+  reset:        `${BASE_URL}/simulate/reset`,
+  agentPrio:    (id) => `${BASE_URL}/agents/${id}/priority`,
 };

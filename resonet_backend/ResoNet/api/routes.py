@@ -12,12 +12,14 @@ from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisco
 from pydantic import BaseModel
 
 import config
-from messaging.message_types import EarthquakeEvent, WebSocketEvent
+from messaging.message_types import EarthquakeEvent, FireEvent, WebSocketEvent
 from simulation.earthquake import EarthquakeSimulator
+from simulation.fire_simulator import FireSimulator
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 _simulator = EarthquakeSimulator()
+_fire_simulator = FireSimulator()
 
 
 # ------------------------------------------------------------------
@@ -28,6 +30,13 @@ class EarthquakeBody(BaseModel):
     lat: Optional[float] = None
     lon: Optional[float] = None
     magnitude: Optional[float] = None
+
+
+class FireBody(BaseModel):
+    lat: Optional[float] = None
+    lon: Optional[float] = None
+    intensity: Optional[float] = None
+    radius_km: Optional[float] = None
 
 
 class PriorityBody(BaseModel):
@@ -120,6 +129,34 @@ async def simulate_hospital_earthquake(request: Request) -> Dict[str, Any]:
     }
 
 
+@router.post("/simulate/scenario/fire")
+async def simulate_fire(request: Request, body: FireBody = FireBody()) -> Dict[str, Any]:
+    """
+    Trigger a fire simulation with steep severity falloff.
+    Defaults to Zone-I (Mahalakshmi Layout) if no coordinates provided.
+    """
+    state = request.app.state
+    demo = config.DEMO_FIRE
+    lat       = body.lat       if body.lat       is not None else demo["epicenter_lat"]
+    lon       = body.lon       if body.lon       is not None else demo["epicenter_lon"]
+    intensity = body.intensity if body.intensity is not None else demo["intensity"]
+    radius_km = body.radius_km if body.radius_km is not None else demo["radius_km"]
+
+    event = _fire_simulator.generate_event(lat, lon, intensity, radius_km)
+    await state.sensing_agent.process_fire_event(event)
+
+    return {
+        "scenario": "fire",
+        "event_id": event.event_id,
+        "calamity_type": "FIRE",
+        "epicenter_zone": demo["epicenter_zone"],
+        "intensity": intensity,
+        "radius_km": radius_km,
+        "epicenter_lat": lat,
+        "epicenter_lon": lon,
+    }
+
+
 # ------------------------------------------------------------------
 # Reset — restores city and agents to pre-earthquake state
 # ------------------------------------------------------------------
@@ -162,6 +199,11 @@ async def reset_simulation(request: Request) -> Dict[str, Any]:
     fire = state.all_agents.get("fire_agent")
     if fire:
         fire.deployed_zones = []
+
+    # Reset police-specific state
+    police = state.all_agents.get("police_agent")
+    if police:
+        police.crowd_control_zones = []
 
     # Reset hospital patient load
     hospital = state.all_agents.get("hospital_agent")

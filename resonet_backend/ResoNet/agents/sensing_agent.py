@@ -13,12 +13,27 @@ import config
 from agents.base_agent import BaseAgent
 from messaging.broker import MessageBroker
 from messaging.message_types import (
-    Bid, EarthquakeEvent, RFP, WebSocketEvent, ZoneStatus,
+    Bid, EarthquakeEvent, FireEvent, RFP, WebSocketEvent, ZoneStatus,
 )
 from negotiation.protocol import ContractNetProtocol
 from simulation.city_model import CityModel
-from simulation.earthquake import EarthquakeSimulator
+from simulation.earthquake import EarthquakeSimulator, _haversine_km
+from simulation.fire_simulator import FireSimulator
 from simulation.zone_classifier import ZoneClassifier
+
+# ── Distance-band thresholds (metres) — must mirror ZoneCircle.jsx ───────────
+# Earthquake: CRITICAL<3600m, HIGH<7000m, LOW<11000m, else SAFE
+_EQ_BANDS_M   = (3_600, 7_000, 11_000)
+# Fire: very tight — only the epicenter zone is CRITICAL, no HIGH band
+# (bands[0]==bands[1] means HIGH is impossible), adjacent zones within 2.5km = LOW
+_FIRE_BANDS_M = (500, 500, 2_500)
+
+def _distance_class(dist_m: float, bands_m) -> str:
+    """Classify a zone purely by its distance from the epicenter."""
+    if dist_m < bands_m[0]: return "CRITICAL"
+    if dist_m < bands_m[1]: return "HIGH"
+    if dist_m < bands_m[2]: return "LOW"
+    return "SAFE"
 
 logger = logging.getLogger(__name__)
 _CNP = ContractNetProtocol()
@@ -47,6 +62,7 @@ class SensingAgent(BaseAgent):
         self.city_model = city_model
         self.zone_classifier = zone_classifier
         self.simulator = EarthquakeSimulator()
+        self.fire_simulator = FireSimulator()
         self.all_agents_ref = all_agents_ref
         self.current_zone_statuses: List[ZoneStatus] = []
         self.orchestrator = None  # set after orchestrator is initialized
@@ -75,10 +91,93 @@ class SensingAgent(BaseAgent):
         severities = self.simulator.compute_zone_severities(eq_event, self.city_model)
         zone_statuses = self.simulator.apply_damage(eq_event, self.city_model, severities)
 
-        # Classify all zones
-        classifications = self.zone_classifier.classify_all(zone_statuses)
+        # Classify → broadcast → elevate → trigger RFPs → dispatch
+        await self._common_pipeline(
+            zone_statuses, eq_event.event_id,
+            calamity_type="EARTHQUAKE",
+            epicenter_lat=eq_event.epicenter_lat,
+            epicenter_lon=eq_event.epicenter_lon,
+            dist_bands_m=_EQ_BANDS_M,
+        )
+
+        self.status = config.STATUS_IDLE
+
+    async def process_fire_event(self, event: Any) -> None:
+        """
+        Handle a FireEvent dict or FireEvent object.
+        Same pipeline as earthquake but uses the fire simulator's steep falloff.
+        """
+        if isinstance(event, dict):
+            fire_event = FireEvent(**event)
+        else:
+            fire_event = event
+
+        import logging as _logging
+        _log = _logging.getLogger(__name__)
+
+        _log.info("")
+        _log.info("╔══════════════════════════════════════════════════════════════")
+        _log.info("║ 🔥 FIRE DETECTED  intensity=%.1f  radius=%.2f km  epicenter=(%.4f, %.4f)  id=%s",
+                  fire_event.intensity, fire_event.radius_km,
+                  fire_event.epicenter_lat, fire_event.epicenter_lon, fire_event.event_id[:8])
+        _log.info("╚══════════════════════════════════════════════════════════════")
+        self.status = config.STATUS_ACTIVE
+
+        # Compute severities with steep fire falloff and apply damage
+        severities = self.fire_simulator.compute_zone_severities(fire_event, self.city_model)
+        zone_statuses = self.fire_simulator.apply_damage(fire_event, self.city_model, severities)
+
+        # Classify → broadcast → elevate → trigger RFPs → dispatch
+        await self._common_pipeline(
+            zone_statuses, fire_event.event_id,
+            calamity_type="FIRE",
+            epicenter_lat=fire_event.epicenter_lat,
+            epicenter_lon=fire_event.epicenter_lon,
+            dist_bands_m=_FIRE_BANDS_M,
+        )
+
+        self.status = config.STATUS_IDLE
+
+    async def _common_pipeline(
+        self,
+        zone_statuses: List[ZoneStatus],
+        event_id: str,
+        calamity_type: str = "EARTHQUAKE",
+        epicenter_lat: float = 0.0,
+        epicenter_lon: float = 0.0,
+        dist_bands_m: tuple = _EQ_BANDS_M,
+    ) -> None:
+        """
+        Shared pipeline for all calamity types:
+        classify → log → broadcast WS → elevate priorities → trigger RFPs → dispatch.
+
+        Zone classification uses **distance from epicenter** (same bands as
+        ZoneCircle.jsx) so the map and backend always agree.
+        The ZoneClassifier's ML/weighted score is still run for logging but
+        the distance-based result is authoritative.
+        """
+        import logging as _logging
+        _log = _logging.getLogger(__name__)
+
+        # Build zone coordinate lookup for haversine
+        zone_coords = {z["id"]: (z["lat"], z["lon"]) for z in config.CITY_ZONES}
+
+        # Authoritative: distance-based classification (mirrors ZoneCircle.jsx)
         for zs in zone_statuses:
-            zs.classification = classifications.get(zs.zone_id, "SAFE")
+            lat, lon = zone_coords.get(zs.zone_id, (epicenter_lat, epicenter_lon))
+            dist_km  = _haversine_km(epicenter_lat, epicenter_lon, lat, lon)
+            dist_m   = dist_km * 1000.0
+            zs.classification = _distance_class(dist_m, dist_bands_m)
+
+        # Also run rule-based classifier for audit logging (not authoritative)
+        classifications = {zs.zone_id: zs.classification for zs in zone_statuses}
+        for zs in zone_statuses:
+            rule_cls = self.zone_classifier.classify(zs)
+            if rule_cls != zs.classification:
+                _log.debug(
+                    "[SENSING] Classifier override on %s: weighted=%s → distance=%s",
+                    zs.zone_id, rule_cls, zs.classification,
+                )
 
         self.current_zone_statuses = zone_statuses
 
@@ -101,8 +200,8 @@ class SensingAgent(BaseAgent):
         _log.info("[SENSING] Summary: %d CRITICAL zones %s | %d HIGH zones %s",
                   len(critical), critical, len(high), high)
 
-        # Publish zone_update WebSocket events — include lat/lon so frontend
-        # can place markers directly without a second GET /zones call
+        # Publish zone_update WebSocket events — include lat/lon and calamity_type
+        # so the frontend can adjust its rendering (e.g. smaller fire radius)
         zone_coords = {z["id"]: {"lat": z["lat"], "lon": z["lon"]}
                        for z in config.CITY_ZONES}
         for zs in zone_statuses:
@@ -110,6 +209,7 @@ class SensingAgent(BaseAgent):
             coords = zone_coords.get(zs.zone_id, {})
             payload["lat"] = coords.get("lat")
             payload["lon"] = coords.get("lon")
+            payload["calamity_type"] = calamity_type
             ws_event = WebSocketEvent(event_type="zone_update", payload=payload)
             await self.broker.broadcast(ws_event)
 
@@ -117,12 +217,10 @@ class SensingAgent(BaseAgent):
         await self._elevate_priorities(zone_statuses, classifications)
 
         # Trigger RFP issuance from agents in CRITICAL/HIGH zones
-        await self._trigger_rfps(zone_statuses, classifications, eq_event.event_id)
+        await self._trigger_rfps(zone_statuses, classifications, event_id, calamity_type)
 
         # Dispatch rescue units and broadcast routes to frontend
         await self._dispatch_rescue_units(zone_statuses)
-
-        self.status = config.STATUS_IDLE
 
     async def _dispatch_rescue_units(self, zone_statuses: List[ZoneStatus]) -> None:
         """
@@ -168,10 +266,15 @@ class SensingAgent(BaseAgent):
         zone_statuses: List[ZoneStatus],
         classifications: Dict[str, str],
         event_id: str,
+        calamity_type: str = "EARTHQUAKE",
     ) -> None:
         """
         Tell specialist agents to issue RFPs for affected zones.
         Agents decide what they need — SensingAgent just signals them.
+
+        For FIRE events, police_agent is also dispatched to affected zones
+        for crowd control, and hospital_agent acts as ambulance for any
+        CRITICAL/HIGH zones (not just Zone-B).
         """
         if self.orchestrator is None:
             self._log("No orchestrator set — skipping RFP triggers")
@@ -179,32 +282,64 @@ class SensingAgent(BaseAgent):
 
         import logging as _logging
         _log = _logging.getLogger(__name__)
-        _log.info("[SENSING] Dispatching alerts to specialist agents...")
+        _log.info("[SENSING] Dispatching alerts to specialist agents (calamity=%s)...", calamity_type)
 
         hospital_agent = self.all_agents_ref.get("hospital_agent")
         ndrf_agent = self.all_agents_ref.get("ndrf_agent")
         fire_agent = self.all_agents_ref.get("fire_agent")
+        police_agent = self.all_agents_ref.get("police_agent")
 
-        # Hospital: only trigger for Zone-B (where the hospital physically is)
-        hospital_zone = next(
-            (zs for zs in zone_statuses if zs.zone_id == "Zone-B"
-             and zs.classification in ("CRITICAL", "HIGH")),
-            None,
-        )
-        if hospital_agent and hospital_zone:
-            _log.info("[SENSING] → hospital_agent  alerted for Zone-B (%s, power=%s)",
-                      hospital_zone.classification, hospital_zone.power_status)
-            await hospital_agent.on_critical_zone(hospital_zone, self.orchestrator)
-        else:
-            _log.info("[SENSING] → hospital_agent  Zone-B is %s — no alert needed",
-                      next((zs.classification for zs in zone_statuses if zs.zone_id == "Zone-B"), "SAFE"))
-
-        # NDRF: respond to CRITICAL zones only (limits RFP flood)
         critical_zones = [zs for zs in zone_statuses if zs.classification == "CRITICAL"]
-        _log.info("[SENSING] → ndrf_agent + fire_agent  responding to %d CRITICAL zone(s): %s",
-                  len(critical_zones), [z.zone_id for z in critical_zones])
-        for zs in critical_zones:
-            if ndrf_agent:
-                await ndrf_agent.on_affected_zone(zs, self.orchestrator)
-            if fire_agent:
-                await fire_agent.on_critical_zone(zs, self.orchestrator)
+        high_zones = [zs for zs in zone_statuses if zs.classification == "HIGH"]
+        priority_zones = critical_zones + high_zones
+
+        if calamity_type == "FIRE":
+            # ── Fire-specific dispatch ──────────────────────────────────
+            _log.info("[SENSING] 🔥 Fire protocol: dispatching fire, police, hospital to %d priority zone(s): %s",
+                      len(priority_zones), [z.zone_id for z in priority_zones])
+
+            for zs in priority_zones:
+                # Fire suppression
+                if fire_agent:
+                    _log.info("[SENSING] → fire_agent dispatched to %s (%s)", zs.zone_id, zs.classification)
+                    await fire_agent.on_critical_zone(zs, self.orchestrator)
+
+                # Police crowd control
+                if police_agent:
+                    _log.info("[SENSING] → police_agent crowd control for %s (%s)", zs.zone_id, zs.classification)
+                    police_agent.assign_crowd_control(zs.zone_id)
+
+                # Hospital / ambulance — responds to all priority zones during fire
+                if hospital_agent and not zs.power_status:
+                    _log.info("[SENSING] → hospital_agent (ambulance) alerted for %s", zs.zone_id)
+                    await hospital_agent.on_critical_zone(zs, self.orchestrator)
+
+            # NDRF for CRITICAL zones if applicable
+            for zs in critical_zones:
+                if ndrf_agent:
+                    await ndrf_agent.on_affected_zone(zs, self.orchestrator)
+
+        else:
+            # ── Earthquake-specific dispatch (original logic) ──────────
+            # Hospital: only trigger for Zone-B (where the hospital physically is)
+            hospital_zone = next(
+                (zs for zs in zone_statuses if zs.zone_id == "Zone-B"
+                 and zs.classification in ("CRITICAL", "HIGH")),
+                None,
+            )
+            if hospital_agent and hospital_zone:
+                _log.info("[SENSING] → hospital_agent  alerted for Zone-B (%s, power=%s)",
+                          hospital_zone.classification, hospital_zone.power_status)
+                await hospital_agent.on_critical_zone(hospital_zone, self.orchestrator)
+            else:
+                _log.info("[SENSING] → hospital_agent  Zone-B is %s — no alert needed",
+                          next((zs.classification for zs in zone_statuses if zs.zone_id == "Zone-B"), "SAFE"))
+
+            # NDRF: respond to CRITICAL zones only (limits RFP flood)
+            _log.info("[SENSING] → ndrf_agent + fire_agent  responding to %d CRITICAL zone(s): %s",
+                      len(critical_zones), [z.zone_id for z in critical_zones])
+            for zs in critical_zones:
+                if ndrf_agent:
+                    await ndrf_agent.on_affected_zone(zs, self.orchestrator)
+                if fire_agent:
+                    await fire_agent.on_critical_zone(zs, self.orchestrator)

@@ -26,15 +26,11 @@ const CLS_COLOR = {
 };
 function clsToColor(cls) { return CLS_COLOR[cls] ?? CLS_COLOR.DEFAULT; }
 
-/* ── Responder config ─────────────────────────────────────────────────────── */
-const RESPONDERS = [
-  { id: 'hospital', label: 'Hospital', emoji: '🏥', maxUnits: 2, lat: 13.030, lon: 77.660 },
-  { id: 'ndrf', label: 'NDRF Base', emoji: '🪖', maxUnits: 2, lat: 12.985, lon: 77.662 },
-  { id: 'fire', label: 'Fire Station', emoji: '🚒', maxUnits: 2, lat: 12.908, lon: 77.640 },
-];
-
-/* ── OSRM helpers ─────────────────────────────────────────────────────────── */
-const OSRM_BASE = 'https://router.project-osrm.org/route/v1/driving';
+/* ── Distance-band classification (mirrors ZoneCircle.jsx exactly) ────────── */
+// Earthquake: CRITICAL<3600m, HIGH<7000m, LOW<11000m
+const EQ_BANDS_M  = [3_600, 7_000, 11_000];
+// Fire: only epicenter is CRITICAL, HIGH band eliminated (0 width), nearby LOW
+const FIRE_BANDS_M = [500, 500, 2_500];   // CRITICAL<500m | HIGH impossible | LOW<2500m
 
 function distM(a, b) {
   const R = 6371000;
@@ -43,6 +39,27 @@ function distM(a, b) {
   const dLon = (b[1] - a[1]) * (Math.PI / 180);
   return Math.sqrt((dLat * R) ** 2 + (dLon * R * Math.cos(mLat)) ** 2);
 }
+
+function effectiveClass(zone, epicenter) {
+  if (!epicenter || zone.lat == null || zone.lon == null) return zone.classification;
+  const bands = epicenter.calamity_type === 'FIRE' ? FIRE_BANDS_M : EQ_BANDS_M;
+  const d = distM([zone.lat, zone.lon], [epicenter.lat, epicenter.lon]);
+  if (d < bands[0]) return 'CRITICAL';
+  if (d < bands[1]) return 'HIGH';
+  if (d < bands[2]) return 'LOW';
+  return 'SAFE';
+}
+
+/* ── Responder config ─────────────────────────────────────────────────────── */
+const RESPONDERS = [
+  { id: 'hospital', label: 'Hospital', emoji: '🏥', maxUnits: 2, lat: 13.030, lon: 77.660 },
+  { id: 'ndrf', label: 'NDRF Base', emoji: '🪖', maxUnits: 2, lat: 12.985, lon: 77.662 },
+  { id: 'fire', label: 'Fire Station', emoji: '🚒', maxUnits: 2, lat: 12.908, lon: 77.640 },
+  { id: 'police', label: 'Police HQ', emoji: '🚓', maxUnits: 2, lat: 12.971, lon: 77.594 },
+];
+
+/* ── OSRM helpers ─────────────────────────────────────────────────────────── */
+const OSRM_BASE = 'https://router.project-osrm.org/route/v1/driving';
 
 function inDanger(pt, zones) {
   return zones.some((z) => distM(pt, [z.lat, z.lon]) < z.radiusM);
@@ -78,20 +95,16 @@ async function fetchRoute(origin, dest, dangerZones, signal) {
 
 /* ── Destination resolver ─────────────────────────────────────────────────── */
 /**
- * Returns up to `max` destinations for a responder.
- * Priority: CRITICAL zones → HIGH zones → epicenter fallback.
-/**
  * Returns all CRITICAL + HIGH zones sorted worst-first.
- * LOW/SAFE zones are excluded — emergency resources shouldn't be diverted there.
+ * Classification is computed by distance from epicenter (same as ZoneCircle.jsx),
+ * ensuring the route targets always match what the map shows.
  */
-function getTargetZones(zones) {
+function getTargetZones(zones, epicenter) {
   return zones
-    .filter((z) => ['CRITICAL', 'HIGH'].includes(z.classification) && z.lat && z.lon)
+    .map((z) => ({ ...z, _eff: effectiveClass(z, epicenter) }))
+    .filter((z) => ['CRITICAL', 'HIGH'].includes(z._eff) && z.lat && z.lon)
     .sort((a, b) => {
-      // CRITICAL before HIGH, then by severity_score desc
-      if (a.classification !== b.classification) {
-        return a.classification === 'CRITICAL' ? -1 : 1;
-      }
+      if (a._eff !== b._eff) return a._eff === 'CRITICAL' ? -1 : 1;
       return (b.severity_score ?? 0) - (a.severity_score ?? 0);
     });
 }
@@ -112,22 +125,29 @@ export default function EmergencyRoutes({ epicenter, active, zones = [] }) {
   const abortRef = useRef(null);
   const fetchedRef = useRef(new Set()); // tracks already-fetched keys to avoid re-fetching on every zone update
 
-  // Danger zones = earthquake halo
-  const dangerZones = useMemo(() => epicenter
-    ? [{ lat: epicenter.lat, lon: epicenter.lon, radiusM: Math.round((epicenter.magnitude / 7.0) * 3600) }]
-    : [], [epicenter]);
+  // Danger zones — dynamic radius based on calamity type
+  // Fire:       tight 500m circle (steep falloff)
+  // Earthquake: magnitude-based radius (~3.6 km for M7)
+  const dangerZones = useMemo(() => {
+    if (!epicenter) return [];
+    const isFire = epicenter.calamity_type === 'FIRE';
+    const radiusM = isFire
+      ? (epicenter.radius_km ?? 0.5) * 1000   // fire: default 500m
+      : Math.round((epicenter.magnitude / 7.0) * 3600); // earthquake: scale by magnitude
+    return [{ lat: epicenter.lat, lon: epicenter.lon, radiusM }];
+  }, [epicenter]);
 
   // Compute current assignment plan — deal zones round-robin so each unit
   // goes to a DIFFERENT zone, spreading coverage across the disaster area.
   const plan = useMemo(() => {
     if (!epicenter || !active) return [];
 
-    // Only CRITICAL and HIGH zones are valid targets
-    const targets = getTargetZones(zones);
+    // Only CRITICAL and HIGH zones are valid targets — classified by distance (mirrors ZoneCircle)
+    const targets = getTargetZones(zones, epicenter);
 
     // Fallback: epicenter itself if no zones classified yet (just triggered)
     const fallback = [{ id: 'epicenter', label: 'Epicenter',
-                        lat: epicenter.lat, lon: epicenter.lon, classification: null }];
+                        lat: epicenter.lat, lon: epicenter.lon, classification: null, _eff: null }];
     const pool = targets.length > 0 ? targets : fallback;
 
     const entries = [];
@@ -138,12 +158,13 @@ export default function EmergencyRoutes({ epicenter, active, zones = [] }) {
         const zone = pool[poolIdx % pool.length];
         poolIdx++;
 
+        const clsForColor = zone._eff ?? zone.classification;
         const dest = {
           id:             zone.id,
           label:          zone.name || zone.label || zone.id,
           lat:            zone.lat,
           lon:            zone.lon,
-          classification: zone.classification,
+          classification: clsForColor,
         };
 
         entries.push({
@@ -152,7 +173,7 @@ export default function EmergencyRoutes({ epicenter, active, zones = [] }) {
           label:      resp.label,
           emoji:      resp.emoji,
           unitIdx:    di,
-          color:      clsToColor(dest.classification),
+          color:      clsToColor(clsForColor),
           origin:     { lat: resp.lat, lon: resp.lon },
           dest,
           startDelay: ri * 700 + di * 400,

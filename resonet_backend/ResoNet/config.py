@@ -183,6 +183,15 @@ DEMO_EARTHQUAKE = {
     "epicenter_zone": "Zone-D",
 }
 
+# --- Demo Fire Seed ---
+DEMO_FIRE = {
+    "epicenter_lat": 13.0051,    # Zone-I (Mahalakshmi Layout)
+    "epicenter_lon": 77.5591,
+    "intensity": 5.0,            # analogous to magnitude
+    "radius_km": 0.4,            # very tight — fire affects only the epicenter zone visually
+    "epicenter_zone": "Zone-I",
+}
+
 # --- Default Road Travel Time (minutes) for city graph edges ---
 DEFAULT_EDGE_TRAVEL_TIME = 10  # minutes per edge, before damage
 BLOCKED_ROAD_TRAVEL_TIME = 999  # effectively impassable
