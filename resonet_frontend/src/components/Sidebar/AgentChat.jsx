@@ -199,7 +199,7 @@ export default function AgentChat({ messages }) {
         {messages.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-center py-6">
             <span className="text-2xl mb-2">📡</span>
-            <p className="text-[11px] text-gray-600">Listening for node broadcasts…</p>
+            <p className="text-[11px] text-gray-600">Waiting for network activity…</p>
             <p className="text-[10px] text-gray-700 mt-1">Trigger an earthquake to start</p>
           </div>
         ) : (
@@ -212,15 +212,6 @@ export default function AgentChat({ messages }) {
         <div ref={bottomRef} />
       </div>
 
-      {/* Decorative input */}
-      <div className="shrink-0 px-2 pb-2">
-        <div className="flex items-center gap-2 bg-panel-card border border-panel-border rounded-lg px-3 py-1.5">
-          <span className="text-[10px] text-gray-700 flex-1 italic">Listening for node broadcasts…</span>
-          <div className="w-4 h-4 rounded bg-panel-border flex items-center justify-center">
-            <span className="text-gray-600 text-[9px]">▶</span>
-          </div>
-        </div>
-      </div>
     </div>
   );
 }

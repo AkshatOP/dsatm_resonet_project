@@ -286,11 +286,8 @@ export default function App() {
           <div className="shrink-0 p-3 border-b border-panel-border">
             <Controls isSimulating={isSimulating} onTrigger={triggerEarthquake} onReset={handleReset} />
           </div>
-          <div className="flex-[3] min-h-0 flex flex-col overflow-hidden">
+          <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
             <AgentChat messages={messages} />
-          </div>
-          <div className="flex-[2] min-h-0 flex flex-col overflow-hidden border-t border-panel-border">
-            <AgentInventory agents={agents} />
           </div>
         </aside>
 
@@ -298,6 +295,11 @@ export default function App() {
         <main className="flex-1 relative">
           <CityMap zones={zones} epicenter={epicenter} />
         </main>
+      </div>
+
+      {/* Bottom Panel — Agent Inventory */}
+      <div className="h-[280px] shrink-0 bg-[#0B0C10] border-t border-white/10 overflow-hidden">
+        <AgentInventory agents={agents} />
       </div>
     </div>
   );

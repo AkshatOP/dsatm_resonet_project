@@ -67,12 +67,12 @@ function ResourceTile({ label, value, accentColor, isLow }) {
 
   return (
     <div
-      className={`flex flex-col gap-1 bg-panel-bg rounded-xl p-2.5 border transition-colors ${
-        isCritical ? 'border-red-700/60' : 'border-panel-border'
+      className={`flex flex-col gap-1 rounded-xl p-2.5 border transition-colors overflow-hidden ${
+        isCritical ? 'bg-red-950/20 border-red-900/50' : 'bg-black/20 border-white/5'
       }`}
     >
       <TipWrap tip={tip}>
-        <span className={`text-[10px] uppercase tracking-wide leading-none ${isCritical ? 'text-red-400' : 'text-gray-500'}`}>
+        <span className={`text-[10px] uppercase tracking-wide leading-none truncate block w-full ${isCritical ? 'text-red-400' : 'text-gray-500'}`}>
           {displayLabel}
         </span>
       </TipWrap>
@@ -114,9 +114,9 @@ function AgentInventoryCard({ agent }) {
   const resources = Object.entries(resource_pool);
 
   return (
-    <div className="border border-panel-border rounded-xl overflow-hidden bg-panel-card/40">
+    <div className="w-80 shrink-0 border border-white/10 rounded-2xl overflow-hidden bg-white/[0.02] backdrop-blur-xl flex flex-col shadow-xl transition-all hover:bg-white/[0.03]">
       {/* Card header */}
-      <div className="flex items-center justify-between px-3 py-2 bg-panel-card border-b border-panel-border">
+      <div className="flex items-center justify-between px-4 py-3 bg-black/20 border-b border-white/5">
         <div className="flex items-center gap-2">
           <span className="text-base">{meta.emoji}</span>
           <div>
@@ -138,7 +138,7 @@ function AgentInventoryCard({ agent }) {
 
       {/* Resource grid */}
       {resources.length > 0 && (
-        <div className="p-2 grid grid-cols-2 gap-1.5">
+        <div className="p-3 grid grid-cols-2 gap-2 flex-1">
           {resources.slice(0, 4).map(([key, val]) => {
             const isLow = typeof val === 'number' && val < 20;
             return (
@@ -155,20 +155,20 @@ function AgentInventoryCard({ agent }) {
       )}
 
       {/* Load bar */}
-      <div className="px-3 pb-2.5 pt-0.5">
-        <div className="flex items-center justify-between mb-1">
+      <div className="px-4 pb-3 pt-1 mt-auto">
+        <div className="flex items-center justify-between mb-1.5">
           <TipWrap tip={LOAD_TOOLTIP}>
-            <span className="text-[10px] text-gray-600 uppercase tracking-wide">Load</span>
+            <span className="text-[10px] text-gray-500 font-semibold uppercase tracking-wider">Load</span>
           </TipWrap>
           <TipWrap tip={WEIGHT_TOOLTIP}>
-            <span className="text-[10px] text-gray-600">
-              priority <span className="text-gray-400">{priority_weight.toFixed(1)}×</span>
+            <span className="text-[10px] text-gray-500">
+              priority <span className="text-gray-300">{priority_weight.toFixed(1)}×</span>
             </span>
           </TipWrap>
         </div>
-        <div className="bg-panel-bg rounded-full h-1.5">
+        <div className="bg-black/40 rounded-full h-1.5 overflow-hidden border border-white/5">
           <div
-            className="h-1.5 rounded-full transition-all duration-500"
+            className="h-full rounded-full transition-all duration-500"
             style={{
               width: `${Math.min(100, loadPct)}%`,
               backgroundColor: isCritLoad ? '#ef4444' : meta.color,
@@ -190,9 +190,9 @@ export default function AgentInventory({ agents }) {
   const agentList = Object.values(agents);
 
   return (
-    <div className="flex flex-col h-full min-h-0">
+    <div className="flex flex-col h-full w-full bg-[#0B0C10]">
       {/* Section header */}
-      <div className="shrink-0 px-4 pt-3 pb-2 flex items-center justify-between border-t border-panel-border">
+      <div className="shrink-0 px-5 py-3 flex items-center justify-between border-b border-white/10 bg-black/40 backdrop-blur-sm">
         <div>
           <p className="text-xs font-bold text-gray-200 uppercase tracking-widest">Inventory</p>
           <p className="text-[10px] text-gray-600 mt-0.5 uppercase tracking-wide">Active agent resource levels</p>
@@ -201,9 +201,9 @@ export default function AgentInventory({ agents }) {
       </div>
 
       {/* Cards */}
-      <div className="flex-1 min-h-0 overflow-y-auto px-3 pb-3 space-y-2">
+      <div className="flex-1 min-h-0 flex overflow-x-auto overflow-y-hidden px-5 py-4 gap-4 items-stretch custom-scrollbar">
         {agentList.length === 0 ? (
-          <p className="text-xs text-gray-600 italic text-center py-6">Connecting to agents…</p>
+          <p className="text-xs text-gray-600 italic py-6">Connecting to agents…</p>
         ) : (
           agentList.map((agent) => (
             <AgentInventoryCard key={agent.agent_id} agent={agent} />
