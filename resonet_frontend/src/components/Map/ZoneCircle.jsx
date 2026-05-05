@@ -74,39 +74,40 @@ export default function ZoneCircle({ zone, epicenter, isHighlighted = false, isD
   const effectiveClass = epicenter ? quakeClass(lat, lon, epicenter) : classification;
   const color          = classColour(effectiveClass);
   const baseRadius     = Math.max(5, Math.min(9, (population_density ?? 0.5) * 10));
-  const radius         = isHighlighted ? baseRadius + 4 : baseRadius;
+  const radius         = baseRadius;   // glow ring handles size on highlight
   const isCritical     = effectiveClass === 'CRITICAL';
 
-  // Highlight: brighter, heavier ring + glow effect via weight + opacity
-  // Dimmed: subtle fade so the highlighted zone pops
+  // Highlight: no fill on main circle — just a clean stroke ring outline.
+  // The outer dashed glow ring carries all the visual weight.
+  // Dimmed: subtle fade so the highlighted zone pops.
   const fillOpacity = isDimmed
-    ? 0.25
+    ? 0.20
     : isHighlighted
-      ? 1
+      ? 0           // hollow — no fill when highlighted
       : isCritical ? 0.92 : 0.78;
 
   const strokeOpacity = isDimmed
-    ? 0.2
+    ? 0.15
     : isHighlighted
-      ? 1
+      ? 0.9
       : isCritical ? 1 : 0.6;
 
-  const strokeWeight = isHighlighted ? 3 : isCritical ? 1.5 : 0.5;
+  const strokeWeight = isHighlighted ? 2 : isCritical ? 1.5 : 0.5;
 
   return (
     <>
-      {/* Subtle glow ring rendered beneath the main circle on highlight */}
+      {/* Outer glow ring — the main highlight indicator */}
       {isHighlighted && (
         <CircleMarker
           center={[lat, lon]}
-          radius={radius + 6}
+          radius={baseRadius + 8}
           pathOptions={{
             color:       color,
             fillColor:   color,
-            fillOpacity: 0.12,
-            weight:      1,
-            opacity:     0.5,
-            dashArray:   '3 3',
+            fillOpacity: 0.10,
+            weight:      1.5,
+            opacity:     0.6,
+            dashArray:   '4 4',
           }}
           interactive={false}
         />

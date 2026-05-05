@@ -159,6 +159,16 @@ export default function MapLegend({ zones = [], onHoverZone }) {
             <span className="text-[11px] text-gray-300">{label}</span>
           </div>
         ))}
+
+        {/* Power grid indicator */}
+        <div className="flex items-center gap-2 mt-2 pt-2" style={{ borderTop: '1px solid #1e293b' }}>
+          <LegendDot color="#60a5fa" />
+          <span className="text-[11px] text-gray-300">Power grid ON</span>
+        </div>
+        <div className="flex items-center gap-2 mb-0.5">
+          <div className="w-2.5 h-2.5 rounded-full shrink-0 border border-gray-600" style={{ background: 'transparent' }} />
+          <span className="text-[11px] text-gray-500">Power grid OFF</span>
+        </div>
       </div>
 
       {/* ── Infrastructure section ─────────────────────────────────── */}
