@@ -154,6 +154,15 @@ class NegotiationOrchestrator:
             logger.info("[FAIRNESS] Gini after award:  %.4f  (Δ%+.4f — system became %s)",
                         gini_after, delta, direction)
 
+            # Step 7b: Broadcast updated agent states so frontend inventory reflects changes
+            for agent_obj in [winner, requester]:
+                if agent_obj is not None:
+                    state = agent_obj.get_state()
+                    await self.broker.broadcast(WebSocketEvent(
+                        event_type="agent_state",
+                        payload=dataclasses.asdict(state),
+                    ))
+
             # Step 8: Create Award and NegotiationDecision
             award = _CNP.create_award(rfp, winning_bid, bids)
         else:

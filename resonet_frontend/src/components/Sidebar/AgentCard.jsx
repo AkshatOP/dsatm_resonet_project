@@ -1,6 +1,6 @@
 /**
  * AgentCard.jsx
- * Displays the status of a single DACRO agent.
+ * Displays the status of a single ResoNet agent.
  * Updated in real-time via agent_state WebSocket events.
  */
 

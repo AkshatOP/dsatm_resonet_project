@@ -1,5 +1,5 @@
 /**
- * App.jsx — DACRO Crisis Response Dashboard
+ * App.jsx — ResoNet Crisis Response Dashboard
  *
  * Sidebar layout:
  *   Controls (fixed) → AgentChat (flex-3) → AgentInventory (flex-2)
@@ -26,6 +26,15 @@ import AgentChat      from './components/Sidebar/AgentChat';
 import AgentInventory from './components/Sidebar/AgentInventory';
 
 const MAX_MSGS = 80;
+
+/* ── Initial resource pools (mirrors backend config.py) ────────── */
+const INITIAL_POOLS = {
+  power_agent:    { power_units: 200 },
+  hospital_agent: { power_units: 50, beds: 300, personnel: 80 },
+  fire_agent:     { vehicles: 12, personnel: 60, water_units: 500 },
+  police_agent:   { personnel: 100, vehicles: 20 },
+  ndrf_agent:     { heavy_equipment: 15, personnel: 120, aerial_units: 4 },
+};
 
 /* ── Chat message factory ─────────────────────────────────────── */
 function makeMsg(type, agentId, text, subtext = null, extras = {}) {
@@ -164,6 +173,57 @@ export default function App() {
 
     const resLabel = resource_type?.replace(/_/g, ' ') ?? 'resources';
 
+    // ── Update inventory live ──────────────────────────────────────
+    // Subtract from winner's pool, add to requester's pool
+    if (winner && requester && resource_type && amount_awarded) {
+      setAgents((prev) => {
+        const next = { ...prev };
+
+        // Helper: compute load using initial pools (same formula as backend)
+        const computeLoad = (agentId, pool) => {
+          const initial = INITIAL_POOLS[agentId];
+          if (!initial) return 0;
+          const ratios = [];
+          for (const [key, initVal] of Object.entries(initial)) {
+            if (initVal > 0) {
+              const current = pool[key] ?? 0;
+              ratios.push(Math.max(0, Math.min(1, 1 - (current / initVal))));
+            }
+          }
+          return ratios.length > 0 ? ratios.reduce((a, b) => a + b, 0) / ratios.length : 0;
+        };
+
+        // Winner loses resources
+        if (next[winner]) {
+          const winnerPool = { ...next[winner].resource_pool };
+          winnerPool[resource_type] = Math.max(0, (winnerPool[resource_type] ?? 0) - amount_awarded);
+          const load = computeLoad(winner, winnerPool);
+          next[winner] = {
+            ...next[winner],
+            resource_pool: winnerPool,
+            current_load: load,
+            status: load >= 0.9 ? 'OVERLOADED' : load > 0 ? 'ACTIVE' : 'IDLE',
+          };
+        }
+
+        // Requester gains resources
+        if (next[requester]) {
+          const reqPool = { ...next[requester].resource_pool };
+          reqPool[resource_type] = (reqPool[resource_type] ?? 0) + amount_awarded;
+          const load = computeLoad(requester, reqPool);
+          next[requester] = {
+            ...next[requester],
+            resource_pool: reqPool,
+            current_load: load,
+            status: load >= 0.9 ? 'OVERLOADED' : load > 0 ? 'ACTIVE' : 'IDLE',
+          };
+        }
+
+        return next;
+      });
+    }
+
+    // ── Chat messages ──────────────────────────────────────────────
     // Requester asking
     pushMsg(makeMsg(
       'request', requester,
@@ -293,9 +353,9 @@ export default function App() {
       <header className="flex items-center justify-between px-5 py-2.5 bg-panel-surface border-b border-panel-border shrink-0 z-10">
         <div className="flex items-center gap-3">
           <span className="text-xl">🌐</span>
-          <span className="text-base font-bold tracking-tight text-white">DACRO</span>
+          <span className="text-base font-bold tracking-tight text-white">ResoNet</span>
           <span className="text-xs text-gray-600 font-mono hidden md:inline">
-            Decentralised Autonomous Crisis Resource Orchestrator
+            Resilient Network — Crisis Resource Orchestrator
           </span>
         </div>
         <div className="flex items-center gap-4">
@@ -341,7 +401,7 @@ export default function App() {
       </div>
 
       {/* Bottom Panel — Agent Inventory */}
-      <div className="h-[280px] shrink-0 bg-[#0B0C10] border-t border-white/10 overflow-hidden">
+      <div className="h-[240px] shrink-0 border-t border-[#1e2330] overflow-hidden">
         <AgentInventory agents={agents} />
       </div>
     </div>

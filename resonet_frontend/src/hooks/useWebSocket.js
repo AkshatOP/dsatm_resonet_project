@@ -1,6 +1,6 @@
 /**
  * useWebSocket.js
- * Manages a persistent WebSocket connection to the DACRO backend.
+ * Manages a persistent WebSocket connection to the ResoNet backend.
  * Auto-reconnects every 3 seconds on disconnect.
  * Dispatches parsed events to caller-provided handler callbacks.
  */

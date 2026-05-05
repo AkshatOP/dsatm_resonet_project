@@ -168,6 +168,12 @@ async def reset_simulation(request: Request) -> Dict[str, Any]:
     if hospital:
         hospital.patient_load = 0.0
 
+    # Broadcast updated agent states to frontend
+    for agent_id, agent in state.all_agents.items():
+        agent_state = dataclasses.asdict(agent.get_state())
+        ws_event = WebSocketEvent(event_type="agent_state", payload=agent_state)
+        await state.broker.broadcast(ws_event)
+
     return {"status": "reset", "message": "City and all agents restored to initial state"}
 
 

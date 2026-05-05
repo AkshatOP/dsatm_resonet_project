@@ -12,8 +12,48 @@
  * Bubble design matches reference: compact card, emoji avatar, agent name + time on top row.
  */
 
-import { useRef, useEffect } from 'react';
+import { useRef, useEffect, useState } from 'react';
 import { AGENT_ICONS } from '../../constants/agentIcons';
+
+/* ── Typewriter Effect ────────────────────────────────────────── */
+function Typewriter({ text, fastForward = false, onComplete }) {
+  const [displayed, setDisplayed] = useState(fastForward ? text : '');
+  const onCompleteRef = useRef(onComplete);
+  onCompleteRef.current = onComplete;
+
+  useEffect(() => {
+    if (fastForward) {
+      setDisplayed(text);
+      if (onCompleteRef.current) onCompleteRef.current();
+      return;
+    }
+
+    let i = 0;
+    let timeout;
+    const typeNext = () => {
+      setDisplayed(text.substring(0, i + 1));
+      i++;
+      if (i < text.length) {
+        // Human/terminal-like speed variations
+        const nextSpeed = Math.random() * 20 + 10;
+        timeout = setTimeout(typeNext, nextSpeed);
+      } else {
+        if (onCompleteRef.current) onCompleteRef.current();
+      }
+    };
+    timeout = setTimeout(typeNext, 10);
+    return () => clearTimeout(timeout);
+  }, [text, fastForward]);
+
+  return (
+    <>
+      {displayed}
+      {!fastForward && displayed.length < text.length && (
+        <span className="inline-block w-1 h-3 ml-0.5 align-middle bg-gray-400 animate-pulse" />
+      )}
+    </>
+  );
+}
 
 /* ── Agent meta lookup ────────────────────────────────────────── */
 function agentMeta(agentId) {
@@ -58,8 +98,13 @@ function Badge({ label }) {
 }
 
 /* ── Standard chat bubble (request / award / xai / dispatch) ──── */
-function ChatBubble({ msg }) {
+function ChatBubble({ msg, fastForward, onComplete }) {
   const meta = agentMeta(msg.agentId);
+  const [textDone, setTextDone] = useState(fastForward);
+
+  useEffect(() => {
+    if (fastForward) setTextDone(true);
+  }, [fastForward]);
 
   const leftAccent = {
     request:  '#60a5fa',
@@ -67,6 +112,15 @@ function ChatBubble({ msg }) {
     xai:      '#c084fc',
     dispatch: '#38bdf8',
   }[msg.type] ?? '#4b5563';
+
+  const handleTextComplete = () => {
+    setTextDone(true);
+    if (!msg.subtext && onComplete) onComplete();
+  };
+
+  const handleSubtextComplete = () => {
+    if (onComplete) onComplete();
+  };
 
   return (
     <div
@@ -90,9 +144,13 @@ function ChatBubble({ msg }) {
 
       {/* Body */}
       <div className="px-3 pb-2.5 space-y-1">
-        <p className="text-xs text-gray-200 leading-relaxed">{msg.text}</p>
-        {msg.subtext && (
-          <p className="text-[11px] text-gray-500 italic leading-relaxed">{msg.subtext}</p>
+        <p className="text-xs text-gray-200 leading-relaxed min-h-[16px]">
+          <Typewriter text={msg.text} fastForward={fastForward} onComplete={handleTextComplete} />
+        </p>
+        {msg.subtext && textDone && (
+          <p className="text-[11px] text-gray-500 italic leading-relaxed min-h-[16px]">
+            <Typewriter text={msg.subtext} fastForward={fastForward} onComplete={handleSubtextComplete} />
+          </p>
         )}
       </div>
     </div>
@@ -100,9 +158,23 @@ function ChatBubble({ msg }) {
 }
 
 /* ── Zone group bubble — staggered per-zone animation ─────────── */
-function ZoneGroupBubble({ msg }) {
+function ZoneGroupBubble({ msg, fastForward, onComplete }) {
   const { groups } = msg;
   const meta = agentMeta('zone_monitor');
+
+  // Trigger next bubble immediately so the network chat doesn't stall while zones animate in
+  const onCompleteRef = useRef(onComplete);
+  onCompleteRef.current = onComplete;
+  useEffect(() => {
+    if (!fastForward && onCompleteRef.current) {
+      const t = setTimeout(() => {
+        if (onCompleteRef.current) onCompleteRef.current();
+      }, 400); // slight delay
+      return () => clearTimeout(t);
+    } else if (fastForward && onCompleteRef.current) {
+      onCompleteRef.current();
+    }
+  }, [fastForward]);
 
   // Build a flat running index for stagger delays across all zone names
   let lineIdx = 0;
@@ -175,10 +247,22 @@ function ZoneGroupBubble({ msg }) {
 /* ── Main AgentChat component ─────────────────────────────────── */
 export default function AgentChat({ messages }) {
   const bottomRef = useRef(null);
+  const [typingIndex, setTypingIndex] = useState(0);
 
+  // Reset sequence when messages clear
+  useEffect(() => {
+    if (messages.length === 0) {
+      setTypingIndex(0);
+    }
+  }, [messages.length]);
+
+  // Auto-scroll as messages type out
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-  }, [messages.length]);
+  }); // run on every render so it keeps scrolling as text streams
+
+  // Only render up to the currently typing message
+  const visibleMessages = messages.slice(0, typingIndex + 1);
 
   return (
     <div className="flex flex-col h-full min-h-0">
@@ -203,11 +287,20 @@ export default function AgentChat({ messages }) {
             <p className="text-[10px] text-gray-700 mt-1">Trigger an earthquake to start</p>
           </div>
         ) : (
-          messages.map((msg) =>
-            msg.type === 'zone_group'
-              ? <ZoneGroupBubble key={msg.id} msg={msg} />
-              : <ChatBubble key={msg.id} msg={msg} />
-          )
+          visibleMessages.map((msg, idx) => {
+            const isCurrent = idx === typingIndex;
+            const isFastForward = idx < typingIndex;
+            
+            const handleComplete = () => {
+              if (isCurrent && typingIndex < messages.length - 1) {
+                setTypingIndex(prev => prev + 1);
+              }
+            };
+
+            return msg.type === 'zone_group'
+              ? <ZoneGroupBubble key={msg.id} msg={msg} fastForward={isFastForward} onComplete={handleComplete} />
+              : <ChatBubble key={msg.id} msg={msg} fastForward={isFastForward} onComplete={handleComplete} />;
+          })
         )}
         <div ref={bottomRef} />
       </div>
