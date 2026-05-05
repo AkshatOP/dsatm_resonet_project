@@ -354,9 +354,6 @@ export default function App() {
         <div className="flex items-center gap-3">
           <span className="text-xl">🌐</span>
           <span className="text-base font-bold tracking-tight text-white">ResoNet</span>
-          <span className="text-xs text-gray-600 font-mono hidden md:inline">
-            Resilient Network — Crisis Resource Orchestrator
-          </span>
         </div>
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-1.5">
