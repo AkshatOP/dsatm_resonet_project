@@ -62,6 +62,11 @@ class EarthquakeSimulator:
             )
             raw = (event.magnitude - dist_km * 0.15) / event.magnitude
             severity = max(0.0, min(1.0, raw))
+            
+            # Explicit override: mark Kengeri (Zone-F) as completely safe
+            if zone["id"] == "Zone-F":
+                severity = 0.0
+                
             severities[zone["id"]] = round(severity, 4)
             logger.debug(
                 "Zone %s: dist=%.2f km, severity=%.4f", zone["id"], dist_km, severity

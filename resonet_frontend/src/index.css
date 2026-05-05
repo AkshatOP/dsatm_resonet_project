@@ -360,13 +360,13 @@ html, body, #root {
 .inv-card {
   width: 240px;
   flex-shrink: 0;
+  height: 100%;
   background: rgba(255,255,255,0.02);
   border: 1px solid rgba(255,255,255,0.05);
   border-radius: 12px;
-  padding: 14px;
+  padding: 12px 14px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
   transition: transform 0.2s, background 0.2s, border-color 0.2s;
   position: relative;
   overflow: hidden;
@@ -388,9 +388,11 @@ html, body, #root {
 }
 
 .inv-card-header {
+  flex-shrink: 0;
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
+  margin-bottom: 12px;
 }
 
 .inv-card-agent {
@@ -438,10 +440,18 @@ html, body, #root {
 
 /* Resources list */
 .inv-card-resources {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 8px;
+  margin-bottom: 12px;
+  padding-right: 4px;
 }
+.inv-card-resources::-webkit-scrollbar { width: 3px; }
+.inv-card-resources::-webkit-scrollbar-track { background: transparent; }
+.inv-card-resources::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 2px; }
 
 .inv-res {
   display: flex;
@@ -473,6 +483,7 @@ html, body, #root {
 
 /* Load bar */
 .inv-card-load {
+  flex-shrink: 0;
   margin-top: auto;
 }
 
