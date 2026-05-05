@@ -139,7 +139,7 @@ export default function MapLegend({ zones = [], onHoverZone }) {
 
   return (
     <div
-      className="absolute bottom-6 right-3 z-[1000] bg-panel-card/90 backdrop-blur border border-panel-border rounded-xl shadow-2xl"
+      className="absolute bottom-6 left-3 z-[1000] bg-panel-card/90 backdrop-blur border border-panel-border rounded-xl shadow-2xl"
       style={{ minWidth: 168, maxWidth: 210 }}
     >
       {/* ── Priority section ───────────────────────────────────────── */}

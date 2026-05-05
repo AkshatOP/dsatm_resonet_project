@@ -129,3 +129,20 @@ AERIAL: dashed red/orange polyline, 2px, curved arc;
       isDimmed → fillOpacity=0.25, strokeOpacity=0.2 for subtle focus effect.
   - Area estimate: π·r² where r = 3.5 − density×2.3 (denser = smaller urban footprint).
   VERIFIED: npm run build → 0 errors.
+
+[2026-05-05 06:07] EMERGENCY ROUTING —
+  - hooks/useOsrmRoute.js: Standalone hook (not used by current impl — inlined for simplicity).
+      OSRM public API, geojson geometry, haversine danger-zone check, segment tagging.
+  - Map/AnimatedRoute.jsx: RAF-based progressive polyline animation.
+      easeInOut cubic easing over 3200ms. Glow layer (weight=10, opacity=0.20) + main line.
+      Danger segments pulse at 600ms interval. Supports replay via key change.
+      Uses raw L.polyline via useMap() — NOT react-leaflet components (incremental update).
+  - Map/EmergencyRoutes.jsx: Orchestrator for 3 responders (Hospital/NDRF/Fire → epicenter).
+      Staggered fetch: 0ms / 600ms / 1200ms. Danger zones = earthquake halo circle.
+      ETA panel overlay: top-center, glassmorphism, neon green. Shows km + ETA per route.
+      ⚠️ badge when route passes through danger zone. ↺ Replay button.
+      Auto-clears on reset (epicenter null). AbortController cancels in-flight fetches.
+  - CityMap.jsx: Added EmergencyRoutes inside MapContainer.
+  - index.css: Added .emergency-routes-eta panel + all sub-element styles. fadeInDown anim.
+  VERIFIED: npm run build → 0 errors. 74 modules.
+

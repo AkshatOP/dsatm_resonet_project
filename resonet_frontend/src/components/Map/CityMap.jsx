@@ -18,6 +18,7 @@ import PowerOverlay    from './PowerOverlay';
 import InfraMarkers    from './InfraMarker';
 import EarthquakeHalo  from './EarthquakeHalo';
 import MapLegend       from './MapLegend';
+import EmergencyRoutes from './EmergencyRoutes';
 
 const CARTO_DARK  = 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png';
 const ATTRIBUTION = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>';
@@ -63,6 +64,9 @@ export default function CityMap({ zones, epicenter }) {
 
         {/* Infrastructure icons — placed well outside the zone cluster */}
         <InfraMarkers />
+
+        {/* Emergency routing — progressive animated polylines from responders → critical zones */}
+        <EmergencyRoutes epicenter={epicenter} active={!!epicenter} zones={zones} />
       </MapContainer>
 
       {/* Zone legend — interactive, collapsible zone list */}
