@@ -3,10 +3,11 @@
  * Dense scatter of tiny dots around a zone center simulating building density.
  * Dot layout is deterministic (seeded by zone ID) and stable across re-renders.
  *
- * Color logic:
- *   • Epicenter present → each DOT is colored by its own distance to the epicenter
- *     (dots physically inside the halo turn red, outer ring orange, etc.)
- *   • No epicenter → all dots use the zone's backend classification color
+ * Color logic (updated):
+ *   ALL dots in a zone share the zone's own classification color,
+ *   so the colored footprint on the map exactly matches its big ZoneCircle dot.
+ *   Classification is computed the same way ZoneCircle.jsx does it (distance bands),
+ *   supporting both earthquake and fire calamity types dynamically.
  *
  * 4-ring layout:
  *   Ring 1 (40%) 0.0003–0.0028°  tight urban core
@@ -37,24 +38,35 @@ function makePRNG(seed) {
   };
 }
 
-/* ── Distance color ─────────────────────────────────────────────── */
+/* ── Distance helpers (mirrors ZoneCircle.jsx exactly) ──────────── */
+// Earthquake: CRITICAL<3600m, HIGH<7000m, LOW<11000m, else SAFE
+const EQ_BANDS_M   = [3_600, 7_000, 11_000];
+// Fire: only epicenter CRITICAL, no HIGH, nearby LOW within 2500m
+const FIRE_BANDS_M = [500, 500, 2_500];
+
 function metersApart(lat1, lon1, lat2, lon2) {
-  const R     = 6371000;
-  const dLat  = (lat2 - lat1) * (Math.PI / 180);
-  const mLat  = ((lat1 + lat2) / 2) * (Math.PI / 180);
-  const dLon  = (lon2 - lon1) * (Math.PI / 180);
+  const R      = 6371000;
+  const dLat   = (lat2 - lat1) * (Math.PI / 180);
+  const mLat   = ((lat1 + lat2) / 2) * (Math.PI / 180);
+  const dLon   = (lon2 - lon1) * (Math.PI / 180);
   const dlat_m = dLat * R;
   const dlon_m = dLon * R * Math.cos(mLat);
   return Math.sqrt(dlat_m * dlat_m + dlon_m * dlon_m);
 }
 
-// Same thresholds as ZoneCircle so dots and circles are always in sync
-function quakeColourAt(lat, lon, epicenter) {
-  const d = metersApart(lat, lon, epicenter.lat, epicenter.lon);
-  if (d < 3600)  return ZONE_COLOURS.CRITICAL;
-  if (d < 7000)  return ZONE_COLOURS.HIGH;
-  if (d < 11000) return ZONE_COLOURS.LOW;
-  return ZONE_COLOURS.SAFE;
+/**
+ * Compute the classification for an entire zone given the epicenter.
+ * Uses the zone's CENTER (not each dot's position) — so every dot in
+ * the zone shares the same color as the big ZoneCircle.
+ */
+function zoneEffectiveClass(zoneLat, zoneLon, epicenter) {
+  if (!epicenter) return null;   // no event — fall back to backend classification
+  const d     = metersApart(zoneLat, zoneLon, epicenter.lat, epicenter.lon);
+  const bands = epicenter.calamity_type === 'FIRE' ? FIRE_BANDS_M : EQ_BANDS_M;
+  if (d < bands[0]) return 'CRITICAL';
+  if (d < bands[1]) return 'HIGH';
+  if (d < bands[2]) return 'LOW';
+  return 'SAFE';
 }
 
 /* ── Dot layout builder ─────────────────────────────────────────── */
@@ -98,29 +110,26 @@ export default function BuildingCluster({ zone, epicenter }) {
     [id, lat, lon, population_density],
   );
 
-  // Fallback color used when no earthquake is active
-  const defaultColor = ZONE_COLOURS[classification] ?? ZONE_COLOURS.DEFAULT;
+  // Compute ONE color for the entire zone (same logic as ZoneCircle).
+  // All dots in this zone use this color so their footprint is visually consistent.
+  const effectiveClass = zoneEffectiveClass(lat, lon, epicenter);
+  const zoneColor = ZONE_COLOURS[effectiveClass ?? classification] ?? ZONE_COLOURS.DEFAULT;
 
   return (
     <>
-      {dots.map((d, i) => {
-        // Each dot picks its own color based on its exact position vs epicenter
-        const color = epicenter ? quakeColourAt(d.lat, d.lon, epicenter) : defaultColor;
-
-        return (
-          <CircleMarker
-            key={`${id}-b-${i}`}
-            center={[d.lat, d.lon]}
-            radius={d.radius}
-            pathOptions={{
-              stroke:      false,
-              fillColor:   color,
-              fillOpacity: d.opacity,
-              interactive: false,
-            }}
-          />
-        );
-      })}
+      {dots.map((d, i) => (
+        <CircleMarker
+          key={`${id}-b-${i}`}
+          center={[d.lat, d.lon]}
+          radius={d.radius}
+          pathOptions={{
+            stroke:      false,
+            fillColor:   zoneColor,
+            fillOpacity: d.opacity,
+            interactive: false,
+          }}
+        />
+      ))}
     </>
   );
 }

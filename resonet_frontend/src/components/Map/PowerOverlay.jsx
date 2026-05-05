@@ -2,13 +2,13 @@
  * PowerOverlay.jsx
  * Renders small glowing blue "city light" dots around every zone that has power.
  *
- * Power-loss logic (frontend-driven, ignores backend's broad power_status signal):
- *   • No epicenter active → all zones show dots (city fully lit)
- *   • Epicenter active    → zones within 7 000 m lose dots (CRITICAL + HIGH impact ring)
- *                           zones beyond 7 000 m keep dots (LOW + SAFE — grid stable)
+ * Power-loss logic (calamity-type aware, matches classification bands):
+ *   • No epicenter active   → all zones show dots (city fully lit)
+ *   • EARTHQUAKE epicenter  → zones within 7 000 m lose dots (CRITICAL + HIGH ring goes dark)
+ *   • FIRE epicenter        → zones within 500 m lose dots (only the epicenter zone goes dark)
  *
- * 7 000 m matches the HIGH/LOW boundary used by ZoneCircle and BuildingCluster,
- * so color bands and power-off areas are always perfectly in sync.
+ * Radius values match EQ_BANDS_M[1] and FIRE_BANDS_M[0] used by ZoneCircle/BuildingCluster
+ * so color bands, power-off areas, and classification are always perfectly in sync.
  *
  * Dot positions are seeded by zone ID — stable across re-renders.
  * Non-interactive (no mouse events).
@@ -45,9 +45,11 @@ function metersApart(lat1, lon1, lat2, lon2) {
   );
 }
 
-// Zones within this distance from the epicenter lose power
-// (matches the HIGH zone outer boundary → CRITICAL + HIGH ring goes dark)
-const POWER_LOSS_RADIUS_M = 7000;
+// Power-loss radii — must match classification band boundaries:
+// Earthquake: HIGH outer edge = 7 000 m  → CRITICAL + HIGH ring goes dark
+// Fire:       CRITICAL edge   =   500 m  → only epicenter zone goes dark
+const EQ_POWER_LOSS_M   = 7_000;
+const FIRE_POWER_LOSS_M =   500;
 
 /* ── Dot layout ───────────────────────────────────────────────── */
 function buildPowerDots(lat, lon, density, zoneId) {
@@ -98,12 +100,16 @@ function PowerZoneDots({ zone }) {
 /* ── Overlay ──────────────────────────────────────────────────── */
 export default function PowerOverlay({ zones, epicenter }) {
   const poweredZones = useMemo(() => {
-    if (!epicenter) return zones;   // no earthquake → all zones powered
+    if (!epicenter) return zones;   // no event → all zones powered
+
+    // Choose radius based on calamity type
+    const lossRadius = epicenter.calamity_type === 'FIRE'
+      ? FIRE_POWER_LOSS_M   // 500 m: only the epicenter zone loses power
+      : EQ_POWER_LOSS_M;    // 7 000 m: entire CRITICAL+HIGH ring goes dark
 
     return zones.filter((z) => {
       const d = metersApart(z.lat, z.lon, epicenter.lat, epicenter.lon);
-      // Keep dots only for zones outside the power-loss radius
-      return d >= POWER_LOSS_RADIUS_M;
+      return d >= lossRadius;   // keep dots only outside the loss radius
     });
   }, [zones, epicenter]);
 

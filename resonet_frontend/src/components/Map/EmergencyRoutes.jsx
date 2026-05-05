@@ -114,11 +114,14 @@ const rkey = (rid, destId) => `${rid}::${destId}`;
 
 /* ── Component ────────────────────────────────────────────────────────────── */
 /**
- * @param {object}        props.epicenter  — { lat, lon, magnitude } | null
- * @param {boolean}       props.active     — false on reset
- * @param {Array}         props.zones      — live zone array from App state
+ * @param {object}        props.epicenter      — { lat, lon, magnitude } | null
+ * @param {boolean}       props.active         — false on reset
+ * @param {Array}         props.zones          — live zone array from App state
+ * @param {Function}      props.onRouteReady   — called once per successful fetch:
+ *                          { respId, label, emoji, unitIdx, destLabel,
+ *                            etaMinutes, distanceKm, hasDanger }
  */
-export default function EmergencyRoutes({ epicenter, active, zones = [] }) {
+export default function EmergencyRoutes({ epicenter, active, zones = [], onRouteReady }) {
   // Flat map of routeKey → { route|null, loading, error, respId, destLabel, unitIdx, color }
   const [routeMap, setRouteMap] = useState({});
   const [replayKey, setReplayKey] = useState(0);
@@ -237,6 +240,18 @@ export default function EmergencyRoutes({ epicenter, active, zones = [] }) {
             ...prev,
             [entry.key]: { ...prev[entry.key], route, loading: false },
           }));
+          // Notify App so it can emit a chat bubble + deduct inventory
+          onRouteReady?.({
+            respId:      entry.respId,
+            label:       entry.label,
+            emoji:       entry.emoji,
+            unitIdx:     entry.unitIdx,
+            destLabel:   entry.dest.label,
+            destClass:   entry.dest.classification,
+            etaMinutes:  route.etaMinutes,
+            distanceKm:  route.distanceKm,
+            hasDanger:   route.hasDanger,
+          });
         } catch (err) {
           if (err.name !== 'AbortError') {
             setRouteMap((prev) => ({

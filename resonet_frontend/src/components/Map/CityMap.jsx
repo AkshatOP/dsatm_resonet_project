@@ -26,7 +26,7 @@ const ATTRIBUTION = '&copy; <a href="https://www.openstreetmap.org/copyright">Op
 const CENTER = [12.9716, 77.5946];
 const ZOOM   = 13;
 
-export default function CityMap({ zones, epicenter }) {
+export default function CityMap({ zones, epicenter, onRouteReady }) {
   const [hoveredZoneId, setHoveredZoneId] = useState(null);
 
   return (
@@ -66,7 +66,7 @@ export default function CityMap({ zones, epicenter }) {
         <InfraMarkers />
 
         {/* Emergency routing — progressive animated polylines from responders → critical zones */}
-        <EmergencyRoutes epicenter={epicenter} active={!!epicenter} zones={zones} />
+        <EmergencyRoutes epicenter={epicenter} active={!!epicenter} zones={zones} onRouteReady={onRouteReady} />
       </MapContainer>
 
       {/* Zone legend — interactive, collapsible zone list */}

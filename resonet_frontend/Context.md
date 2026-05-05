@@ -219,3 +219,67 @@ AERIAL: dashed red/orange polyline, 2px, curved arc;
       All others       → SAFE ✓
   VERIFIED: npm run build → 0 errors. 74 modules.
   ⚠️ Restart backend to pick up config.py + sensing_agent.py changes.
+
+[2026-05-05 09:15] ZONE-COHERENT DOT COLORING —
+  PROBLEM: BuildingCluster colored each dot by the dot's own physical distance to the epicenter.
+  This caused dots physically near zone borders to pick up a different color than their zone's
+  big circle, making the map look inconsistent (dots of mixed colors around each zone).
+  FIX: Map/BuildingCluster.jsx rewritten.
+  - Replaced per-dot quakeColourAt(d.lat, d.lon) with zoneEffectiveClass(zone.lat, zone.lon).
+  - Classification computed ONCE per zone using the zone center's distance to epicenter.
+  - Uses the same EQ_BANDS_M / FIRE_BANDS_M constants as ZoneCircle.jsx and EmergencyRoutes.jsx.
+  - All dots in Zone-C (Yeshwanthpur) are yellow (LOW). All dots in Zone-I are red (CRITICAL).
+  - No epicenter → dots fall back to zone.classification from backend (unchanged behavior).
+  - Removed the redundant quakeColourAt() per-dot function and the inner map callback wrapper.
+  VERIFIED: npm run build → 0 errors. 74 modules.
+
+[2026-05-05 09:22] PER-RESPONDER DISPATCH CHAT + INVENTORY DEPLETION —
+  PROBLEM 1: Chat only showed generic "NDRF aerial/land" messages for all responders.
+  Hospital, Fire, Police routes were drawn on the map with zero chat notification.
+  PROBLEM 2: Inventory didn't decrease when routes were drawn — only negotiation events
+  updated the pool, but route deployment (EmergencyRoutes) was purely frontend-side.
+  FIX:
+  - Map/EmergencyRoutes.jsx: Added onRouteReady prop. Called with per-unit info
+      { respId, label, emoji, unitIdx, destLabel, destClass, etaMinutes, distanceKm, hasDanger }
+      once OSRM fetch succeeds for each unit. Stagger timing already gives natural chat rhythm.
+  - Map/CityMap.jsx: Threads onRouteReady from App → EmergencyRoutes.
+  - App.jsx: 
+      • RESP_AGENT map: respId (hospital/ndrf/fire/police) → backend agent_id.
+      • DEPLOY_COST table: per-unit resource cost for each responder.
+      • handleRouteReady(): dedup by route:respId:unitIdx:destLabel key.
+          - Pushes a unique chat bubble per agency with emoji, ETA, km, ⚠️ if dangerous.
+          - Deducts DEPLOY_COST from that agent's resource_pool in setAgents.
+          - Recomputes current_load and status (IDLE/ACTIVE/OVERLOADED) same as onNegotiation.
+      • onDispatch(): now silently updates dispatch state only; no more NDRF-only chat.
+      • CityMap now receives onRouteReady={handleRouteReady}.
+  CHAT SEQUENCE (fire example):
+    [Trigger] 🔥 Fire outbreak — dispatching emergency units (immediate, from handleTriggerFire)
+    [WS]      Zone Monitor — Zone-I CRITICAL, Zone-B/A/H/C LOW  (from zone_update batch)
+    [WS]      RFP requests + awards from sensing_agent triggering on_critical_zone (negotiation)
+    [OSRM]    🚒 Fire Unit 1 en route → Zone-I (ETA Xm) — from onRouteReady
+    [OSRM]    🏥 Ambulance Unit 1 en route → Zone-I (ETA Xm)
+    [OSRM]    🪖 NDRF Unit 1 deploying → Zone-I (ETA Xm)
+    [OSRM]    🚓 Police Unit 1 en route → Zone-I for crowd control (ETA Xm)
+    ... (Unit 2 of each responder 300-400ms later)
+  INVENTORY DEPLETION per unit deployed:
+    hospital: -8 personnel, -10 beds
+    ndrf:     -12 personnel, -1 heavy_equipment
+    fire:     -6 personnel, -1 vehicle, -30 water_units
+    police:   -8 personnel, -1 vehicle
+  VERIFIED: npm run build → 0 errors. 74 modules.
+
+[2026-05-05 09:29] POWER OVERLAY FIRE FIX —
+  PROBLEM: PowerOverlay hardcoded power-loss radius = 7000m for all calamity types.
+  During a fire at Zone-I, this blanked out ALL blue city-light dots within 7km —
+  covering most of the visible map — even though only Zone-I (the epicenter) actually
+  lost power. The chat also said "1 sector offline" but showed no blue dots for 11 zones.
+  FIX:
+  - Map/PowerOverlay.jsx: Replaced POWER_LOSS_RADIUS_M with two constants:
+      EQ_POWER_LOSS_M   = 7 000 m  (earthquake: CRITICAL+HIGH ring goes dark)
+      FIRE_POWER_LOSS_M =   500 m  (fire: only the epicenter zone goes dark)
+    poweredZones useMemo now reads epicenter.calamity_type to pick the correct radius.
+  - App.jsx flushPowerBatch: Same fix — lossRadius = 500m for FIRE, 7000m for EQ,
+    so the "X sectors offline" chat count matches exactly what PowerOverlay renders.
+  INVARIANT: FIRE_POWER_LOSS_M (500) must equal FIRE_BANDS_M[0] (500) so the dark
+  zone and the CRITICAL classification zone are always the same area.
+  VERIFIED: npm run build → 0 errors. 74 modules.

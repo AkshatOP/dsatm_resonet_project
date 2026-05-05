@@ -36,6 +36,22 @@ const INITIAL_POOLS = {
   ndrf_agent:     { heavy_equipment: 15, personnel: 120, aerial_units: 4 },
 };
 
+/* ── Route responder → backend agent ID mapping ────────────────────── */
+const RESP_AGENT = {
+  hospital: 'hospital_agent',
+  ndrf:     'ndrf_agent',
+  fire:     'fire_agent',
+  police:   'police_agent',
+};
+
+/* cost per unit deployed — deducted once per route when OSRM resolves */
+const DEPLOY_COST = {
+  hospital: { personnel: 8,  beds: 10 },
+  ndrf:     { personnel: 12, heavy_equipment: 1 },
+  fire:     { personnel: 6,  vehicles: 1, water_units: 30 },
+  police:   { personnel: 8,  vehicles: 1 },
+};
+
 /* ── Haversine approx (flat-earth OK for < 50 km) ────────────── */
 function metersApart(lat1, lon1, lat2, lon2) {
   const R    = 6371000;
@@ -138,11 +154,11 @@ export default function App() {
 
     const epi = epicenterRef.current;
 
-    // Filter to only zones within 7 km of the epicenter (CRITICAL + HIGH ring).
-    // Zones further away (LOW + SAFE) keep their power — matches PowerOverlay map.
-    // If epicenter isn't known yet, nothing is reported (very unlikely edge-case).
+    // Use the same calamity-aware radius as PowerOverlay:
+    // Fire → 500m (only the epicenter zone), Earthquake → 7000m (CRITICAL+HIGH ring)
+    const lossRadius = epi?.calamity_type === 'FIRE' ? 500 : 7000;
     const off = epi
-      ? collected.filter((z) => metersApart(z.lat, z.lon, epi.lat, epi.lon) < 7000)
+      ? collected.filter((z) => metersApart(z.lat, z.lon, epi.lat, epi.lon) < lossRadius)
       : [];
 
     if (off.length === 0) return;
@@ -304,28 +320,71 @@ export default function App() {
   }, []);
 
   const onDispatch = useCallback((payload) => {
-    const { assignments } = payload;
-    setDispatch(assignments ?? {});
+    // Silently update dispatch state — chat messages now come from onRouteReady
+    setDispatch(payload.assignments ?? {});
+  }, []);
 
-    const aerial = Object.entries(assignments ?? {}).filter(([, a]) => a.mode === 'AERIAL');
-    const land   = Object.entries(assignments ?? {}).filter(([, a]) => a.mode === 'LAND');
+  /* ── Route-ready — fired by EmergencyRoutes when each OSRM fetch resolves ── */
+  const handleRouteReady = useCallback((info) => {
+    const { respId, label, emoji, unitIdx, destLabel, destClass, etaMinutes, distanceKm, hasDanger } = info;
 
-    if (aerial.length > 0) {
-      const summary = aerial.map(([z, a]) => `${z} (ETA ${a.eta_minutes}min)`).join(', ');
-      pushMsg(makeMsg('dispatch', 'ndrf_agent',
-        `Aerial deployment authorised for: ${summary}.`,
-        `${aerial[0]?.[1]?.units_assigned ?? 10} units per zone · helicopter dispatch initiated`,
-        { badge: 'AERIAL' },
-      ));
-    }
-    if (land.length > 0) {
-      const summary = land.map(([z, a]) => `${z} (ETA ${a.eta_minutes}min)`).join(', ');
-      pushMsg(makeMsg('dispatch', 'ndrf_agent',
-        `Ground convoy routing to: ${summary}.`,
-        `${land[0]?.[1]?.units_assigned ?? 10} units per zone · land route confirmed`,
-        { badge: 'LAND' },
-      ));
-    }
+    // Dedup: one bubble per (respId, unit index, destination)
+    const key = `route:${respId}:${unitIdx}:${destLabel}`;
+    if (seenDecisions.current.has(key)) return;
+    seenDecisions.current.add(key);
+
+    // Chat bubble — unique message per responder type
+    const MESSAGES = {
+      hospital: [
+        `🏥 Ambulance Unit ${unitIdx + 1} en route to ${destLabel}.`,
+        `ETA ${etaMinutes} min · ${distanceKm} km${hasDanger ? ' · ⚠️ route passes through danger zone' : ''} · Medical team on standby.`,
+      ],
+      ndrf:     [
+        `🪖 NDRF Unit ${unitIdx + 1} deploying to ${destLabel}.`,
+        `ETA ${etaMinutes} min · ${distanceKm} km${hasDanger ? ' · ⚠️ danger zone on path' : ''} · Heavy rescue equipment loaded.`,
+      ],
+      fire:     [
+        `🚒 Fire Unit ${unitIdx + 1} responding to ${destLabel}.`,
+        `ETA ${etaMinutes} min · ${distanceKm} km${hasDanger ? ' · ⚠️ active fire zone ahead' : ''} · Water tanker + suppression crew dispatched.`,
+      ],
+      police:   [
+        `🚓 Police Unit ${unitIdx + 1} en route to ${destLabel} for crowd control.`,
+        `ETA ${etaMinutes} min · ${distanceKm} km${hasDanger ? ' · ⚠️ route through incident zone' : ''} · Perimeter establishment protocol active.`,
+      ],
+    };
+    const [text, subtext] = MESSAGES[respId] ?? [
+      `${emoji} ${label} Unit ${unitIdx + 1} dispatched to ${destLabel}.`,
+      `ETA ${etaMinutes} min · ${distanceKm} km`,
+    ];
+
+    const agentId = RESP_AGENT[respId] ?? respId;
+    pushMsg(makeMsg('dispatch', agentId, text, subtext, { badge: destClass === 'CRITICAL' ? 'AERIAL' : 'LAND' }));
+
+    // Deduct resources for this deployed unit
+    const cost = DEPLOY_COST[respId];
+    if (!cost) return;
+
+    setAgents((prev) => {
+      if (!prev[agentId]) return prev;
+      const pool = { ...prev[agentId].resource_pool };
+      for (const [resource, amount] of Object.entries(cost)) {
+        pool[resource] = Math.max(0, (pool[resource] ?? 0) - amount);
+      }
+      const initial = INITIAL_POOLS[agentId] ?? {};
+      const ratios = Object.entries(initial)
+        .filter(([, iv]) => iv > 0)
+        .map(([k, iv]) => Math.max(0, Math.min(1, 1 - (pool[k] ?? 0) / iv)));
+      const load = ratios.length ? ratios.reduce((a, b) => a + b, 0) / ratios.length : 0;
+      return {
+        ...prev,
+        [agentId]: {
+          ...prev[agentId],
+          resource_pool: pool,
+          current_load:  load,
+          status: load >= 0.9 ? 'OVERLOADED' : load > 0 ? 'ACTIVE' : 'IDLE',
+        },
+      };
+    });
   }, [pushMsg]);
 
   useWebSocket({ onZoneUpdate, onNegotiation, onXai, onAgentState, onDispatch });
@@ -439,9 +498,9 @@ export default function App() {
           </div>
         </aside>
 
-        {/* Map — dispatch lines hidden for now */}
+        {/* Map */}
         <main className="flex-1 relative">
-          <CityMap zones={zones} epicenter={epicenter} />
+          <CityMap zones={zones} epicenter={epicenter} onRouteReady={handleRouteReady} />
         </main>
       </div>
 
