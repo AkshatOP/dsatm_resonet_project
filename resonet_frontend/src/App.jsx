@@ -231,56 +231,6 @@ export default function App() {
 
     const resLabel = resource_type?.replace(/_/g, ' ') ?? 'resources';
 
-    // ── Update inventory live ──────────────────────────────────────
-    // Subtract from winner's pool, add to requester's pool
-    if (winner && requester && resource_type && amount_awarded) {
-      setAgents((prev) => {
-        const next = { ...prev };
-
-        // Helper: compute load using initial pools (same formula as backend)
-        const computeLoad = (agentId, pool) => {
-          const initial = INITIAL_POOLS[agentId];
-          if (!initial) return 0;
-          const ratios = [];
-          for (const [key, initVal] of Object.entries(initial)) {
-            if (initVal > 0) {
-              const current = pool[key] ?? 0;
-              ratios.push(Math.max(0, Math.min(1, 1 - (current / initVal))));
-            }
-          }
-          return ratios.length > 0 ? ratios.reduce((a, b) => a + b, 0) / ratios.length : 0;
-        };
-
-        // Winner loses resources
-        if (next[winner]) {
-          const winnerPool = { ...next[winner].resource_pool };
-          winnerPool[resource_type] = Math.max(0, (winnerPool[resource_type] ?? 0) - amount_awarded);
-          const load = computeLoad(winner, winnerPool);
-          next[winner] = {
-            ...next[winner],
-            resource_pool: winnerPool,
-            current_load: load,
-            status: load >= 0.9 ? 'OVERLOADED' : load > 0 ? 'ACTIVE' : 'IDLE',
-          };
-        }
-
-        // Requester gains resources
-        if (next[requester]) {
-          const reqPool = { ...next[requester].resource_pool };
-          reqPool[resource_type] = (reqPool[resource_type] ?? 0) + amount_awarded;
-          const load = computeLoad(requester, reqPool);
-          next[requester] = {
-            ...next[requester],
-            resource_pool: reqPool,
-            current_load: load,
-            status: load >= 0.9 ? 'OVERLOADED' : load > 0 ? 'ACTIVE' : 'IDLE',
-          };
-        }
-
-        return next;
-      });
-    }
-
     // ── Build population-density-aware zone deployment breakdown ───
     // Pull current zones from state snapshot for distribution message.
     // We derive a subtext explaining *which* zones the units go to.
@@ -471,8 +421,37 @@ export default function App() {
     bootstrap();
   }, []);
 
+  /* ── Reset ────────────────────────────────────────────────────── */
+  const handleReset = useCallback(async () => {
+    return new Promise((resolve) => {
+      resetSystem(() => {
+        // Clear zone batch
+        clearTimeout(zoneBatchTimerRef.current);
+        zoneBatchRef.current = [];
+        // Clear power batch
+        clearTimeout(powerBatchTimerRef.current);
+        powerBatchRef.current = [];
+        // Clear dedup sets
+        seenDecisions.current.clear();
+        decisionsRef.current.clear();
+        // Clear UI state
+        setDispatch({});
+        setMessages([]);
+        fetch(ENDPOINTS.state).then((r) => r.json()).then((d) => {
+          setAgents(d.agents ?? {});
+          const zonesArr = Array.isArray(d.zones) ? d.zones : (d.zones?.zones ?? []);
+          setZones(zonesArr.map((z) => ({ ...z, classification: null, severity_score: null })));
+          resolve();
+        }).catch(() => {
+          resolve();
+        });
+      });
+    });
+  }, [resetSystem]);
+
   /* ── Trigger — push immediate power_agent alert, then fire simulation ── */
   const handleTrigger = useCallback(async (lat, lon, zone_id) => {
+    await handleReset(); // Force reset before simulation
     const zoneLabel = zone_id ?? 'all sectors';
     pushMsg(makeMsg(
       'request', 'power_agent',
@@ -480,9 +459,10 @@ export default function App() {
       'Scanning grid integrity — standby for sector status report.',
     ));
     await triggerEarthquake({ lat, lon, zone_id });
-  }, [triggerEarthquake, pushMsg]);
+  }, [triggerEarthquake, pushMsg, handleReset]);
 
   const handleTriggerFire = useCallback(async (lat, lon, zone_id) => {
+    await handleReset(); // Force reset before simulation
     const zoneLabel = zone_id ? ` in ${zone_id}` : ' in Zone-I (Mahalakshmi Layout)';
     pushMsg(makeMsg(
       'request', 'fire_agent',
@@ -490,29 +470,7 @@ export default function App() {
       'Alerting Fire, Police, and Ambulance — initiating response protocol.',
     ));
     await triggerFire({ lat, lon, zone_id });
-  }, [triggerFire, pushMsg]);
-
-  /* ── Reset ────────────────────────────────────────────────────── */
-  const handleReset = useCallback(() => {
-    resetSystem(() => {
-      // Clear zone batch
-      clearTimeout(zoneBatchTimerRef.current);
-      zoneBatchRef.current = [];
-      // Clear power batch
-      clearTimeout(powerBatchTimerRef.current);
-      powerBatchRef.current = [];
-      // Clear dedup sets
-      seenDecisions.current.clear();
-      decisionsRef.current.clear();
-      // Clear UI state
-      setZones((prev) => prev.map((z) => ({ ...z, classification: null, severity_score: null })));
-      setDispatch({});
-      setMessages([]);
-      fetch(ENDPOINTS.state).then((r) => r.json()).then((d) => {
-        setAgents(d.agents ?? {});
-      }).catch(() => {});
-    });
-  }, [resetSystem]);
+  }, [triggerFire, pushMsg, handleReset]);
 
   const isHealthy = health?.status === 'ok';
 
@@ -523,7 +481,7 @@ export default function App() {
       <header className="flex items-center justify-between px-5 py-2.5 bg-panel-surface border-b border-panel-border shrink-0 z-10">
         <div className="flex items-center gap-3">
           <span className="text-xl">🌐</span>
-          <span className="text-base font-bold tracking-tight text-white">ResoNet</span>
+          <span className="text-base font-bold tracking-tight text-white">ResoNet (Resource Negotiation Network)</span>
         </div>
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-1.5">

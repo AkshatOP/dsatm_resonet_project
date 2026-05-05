@@ -167,63 +167,6 @@ function ResourceCard({ agent, allAgents }) {
   );
 }
 
-/* ── Operational card (no physical resources — policy/xai/sensing/rescue) ── */
-function OperationalCard({ agent }) {
-  const {
-    agent_id,
-    agent_type,
-    status = 'IDLE',
-    priority_weight = 1,
-  } = agent;
-
-  const type = agent_type ?? agentTypeFromId(agent_id);
-  const meta = AGENT_ICONS[type] ?? { emoji: '🤖', color: '#94a3b8', label: type };
-  const tag  = nodeTag(agent_id);
-  const role = AGENT_ROLE[agent_id] ?? 'Operational Agent';
-
-  const statusColor = {
-    IDLE:       '#6b7280',
-    ACTIVE:     '#22c55e',
-    OVERLOADED: '#ef4444',
-    OFFLINE:    '#374151',
-  }[status] ?? '#6b7280';
-
-  return (
-    <div className="inv-card inv-card--op" style={{ '--accent': meta.color }}>
-      <div className="inv-card-header">
-        <div className="inv-card-agent">
-          <span className="inv-card-emoji">{meta.emoji}</span>
-          <div>
-            <div className="inv-card-name">{meta.label}</div>
-            <div className="inv-card-meta">
-              <span className="inv-card-dot" style={{ background: statusColor }} />
-              <span>{status}</span>
-              <span className="inv-card-sep">·</span>
-              <span style={{ color: meta.color }}>{tag}</span>
-            </div>
-          </div>
-        </div>
-        <div className="inv-card-weight" title="Priority weight">
-          {priority_weight.toFixed(1)}×
-        </div>
-      </div>
-
-      {/* Role description */}
-      <div className="inv-op-role">
-        <p className="inv-op-label">Function</p>
-        <p className="inv-op-desc" style={{ color: meta.color }}>{role}</p>
-      </div>
-
-      {/* Status indicator */}
-      <div className="inv-op-status-row">
-        <span className="inv-op-status-dot" style={{ background: statusColor }} />
-        <span className="inv-op-status-text" style={{ color: statusColor }}>
-          {status === 'ACTIVE' ? 'Actively processing' : status === 'IDLE' ? 'Standing by' : status.toLowerCase()}
-        </span>
-      </div>
-    </div>
-  );
-}
 
 /* ── Preferred display order ─────────────────────────────────── */
 const DISPLAY_ORDER = [
@@ -249,8 +192,7 @@ export default function AgentInventory({ agents }) {
     return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
   });
 
-  const resourceAgents    = sortedAgents.filter((a) => Object.keys(a.resource_pool ?? {}).length > 0);
-  const operationalAgents = sortedAgents.filter((a) => Object.keys(a.resource_pool ?? {}).length === 0);
+  const resourceAgents = sortedAgents.filter((a) => Object.keys(a.resource_pool ?? {}).length > 0);
 
   const scrollRef = useRef(null);
   const dragState = useRef({ dragging: false, startX: 0, scrollLeft: 0 });
@@ -282,12 +224,7 @@ export default function AgentInventory({ agents }) {
       <div className="inv-panel-header">
         <div className="flex items-center gap-3">
           <span className="inv-panel-title">Inventory</span>
-          <span className="inv-panel-sub">{allAgentsList.length} agents</span>
-          {resourceAgents.length > 0 && (
-            <span className="inv-panel-sub text-[9px]">
-              · {resourceAgents.length} with resources · {operationalAgents.length} operational
-            </span>
-          )}
+          <span className="inv-panel-sub">{resourceAgents.length} agents</span>
         </div>
       </div>
 
@@ -304,17 +241,9 @@ export default function AgentInventory({ agents }) {
           <p className="inv-empty">Connecting to agents…</p>
         ) : (
           <>
-            {/* Resource agents first */}
+            {/* Resource agents */}
             {resourceAgents.map((agent) => (
               <ResourceCard key={agent.agent_id} agent={agent} allAgents={agents} />
-            ))}
-            {/* Divider */}
-            {operationalAgents.length > 0 && resourceAgents.length > 0 && (
-              <div className="inv-divider" />
-            )}
-            {/* Operational agents */}
-            {operationalAgents.map((agent) => (
-              <OperationalCard key={agent.agent_id} agent={agent} />
             ))}
           </>
         )}
