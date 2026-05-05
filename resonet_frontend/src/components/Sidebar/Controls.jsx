@@ -34,7 +34,7 @@ export default function Controls({ isSimulating, onTrigger, onTriggerFire, onRes
           }`}
       >
         <span className="text-lg">🔥</span>
-        {isSimulating ? 'Simulating…' : 'Simulate Fire (Zone-I)'}
+        {isSimulating ? 'Simulating…' : 'Simulate Fire (Demo)'}
       </button>
 
       <button

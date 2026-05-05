@@ -50,13 +50,59 @@ function effectiveClass(zone, epicenter) {
   return 'SAFE';
 }
 
-/* ── Responder config ─────────────────────────────────────────────────────── */
-const RESPONDERS = [
-  { id: 'hospital', label: 'Hospital', emoji: '🏥', maxUnits: 2, lat: 13.030, lon: 77.660 },
-  { id: 'ndrf', label: 'NDRF Base', emoji: '🪖', maxUnits: 2, lat: 12.985, lon: 77.662 },
-  { id: 'fire', label: 'Fire Station', emoji: '🚒', maxUnits: 2, lat: 12.908, lon: 77.640 },
-  { id: 'police', label: 'Police HQ', emoji: '🚓', maxUnits: 2, lat: 12.971, lon: 77.594 },
+/* ── Responder station registry ───────────────────────────────────────────── */
+/**
+ * Multiple physical stations per responder type, distributed N/S/E/W across
+ * the city. MUST mirror config.RESPONDER_LOCATIONS on the backend.
+ *
+ * For every CRITICAL/HIGH destination we pick the *closest* station of each
+ * type, then dispatch up to maxUnits units from there. If a single station is
+ * the nearest for multiple destinations, units fan out to those zones.
+ */
+const RESPONDER_TYPES = [
+  { id: 'hospital', label: 'Hospital',     emoji: '🏥', maxUnits: 2 },
+  { id: 'ndrf',     label: 'NDRF Base',    emoji: '🪖', maxUnits: 2 },
+  { id: 'fire',     label: 'Fire Station', emoji: '🚒', maxUnits: 2 },
+  { id: 'police',   label: 'Police HQ',    emoji: '🚓', maxUnits: 2 },
 ];
+
+const STATIONS = {
+  hospital: [
+    { id: 'HOSP-E', name: 'Hebbal Medical Centre',          lat: 13.030, lon: 77.660 },
+    { id: 'HOSP-W', name: 'Magadi West Medical Centre',     lat: 12.985, lon: 77.460 },
+    { id: 'HOSP-N', name: 'Yelahanka District Hospital',    lat: 13.055, lon: 77.530 },
+  ],
+  fire: [
+    { id: 'FIRE-E', name: 'Banaswadi Fire Station',         lat: 12.908, lon: 77.640 },
+    { id: 'FIRE-W', name: 'Magadi Road Fire Station',       lat: 12.968, lon: 77.450 },
+    { id: 'FIRE-S', name: 'Kanakapura Fire Station',        lat: 12.870, lon: 77.560 },
+  ],
+  police: [
+    { id: 'POL-C',  name: 'Central Police HQ',              lat: 12.971, lon: 77.594 },
+    { id: 'POL-W',  name: 'West Bangalore Police HQ',       lat: 13.000, lon: 77.480 },
+    { id: 'POL-S',  name: 'South Bangalore Police HQ',      lat: 12.890, lon: 77.530 },
+  ],
+  ndrf: [
+    { id: 'NDRF-E', name: 'Hebbal NDRF Rapid Response',     lat: 12.985, lon: 77.662 },
+    { id: 'NDRF-W', name: 'Nelamangala NDRF Base',          lat: 12.945, lon: 77.460 },
+    { id: 'NDRF-N', name: 'Yelahanka NDRF Base',            lat: 13.060, lon: 77.580 },
+  ],
+};
+
+/**
+ * Find the closest station of a given responder type to a destination point.
+ * Returns the station object — never null because each list has ≥ 1 entry.
+ */
+function nearestStation(respType, destLat, destLon) {
+  const list = STATIONS[respType] ?? [];
+  let best = list[0];
+  let bestD = Infinity;
+  for (const s of list) {
+    const d = distM([s.lat, s.lon], [destLat, destLon]);
+    if (d < bestD) { bestD = d; best = s; }
+  }
+  return best;
+}
 
 /* ── OSRM helpers ─────────────────────────────────────────────────────────── */
 const OSRM_BASE = 'https://router.project-osrm.org/route/v1/driving';
@@ -109,8 +155,9 @@ function getTargetZones(zones, epicenter) {
     });
 }
 
-/* ── Route key ────────────────────────────────────────────────────────────── */
-const rkey = (rid, destId) => `${rid}::${destId}`;
+/* ── Route key — must include station so the same responder type can dispatch
+ *    from different stations to different destinations within the same plan. */
+const rkey = (rid, stationId, destId) => `${rid}::${stationId}::${destId}`;
 
 /* ── Component ────────────────────────────────────────────────────────────── */
 /**
@@ -140,28 +187,34 @@ export default function EmergencyRoutes({ epicenter, active, zones = [], onRoute
     return [{ lat: epicenter.lat, lon: epicenter.lon, radiusM }];
   }, [epicenter]);
 
-  // Compute current assignment plan — deal zones round-robin so each unit
-  // goes to a DIFFERENT zone, spreading coverage across the disaster area.
+  // Compute current assignment plan — for each CRITICAL/HIGH destination zone,
+  // dispatch one unit per responder type from that responder's *closest* station.
+  // Worst zones are served first; remaining unit slots fan out round-robin so the
+  // total number of routes per type stays bounded by maxUnits.
   const plan = useMemo(() => {
     if (!epicenter || !active) return [];
 
-    // Only CRITICAL and HIGH zones are valid targets — classified by distance (mirrors ZoneCircle)
     const targets = getTargetZones(zones, epicenter);
 
-    // Fallback: epicenter itself if no zones classified yet (just triggered)
-    const fallback = [{ id: 'epicenter', label: 'Epicenter',
-                        lat: epicenter.lat, lon: epicenter.lon, classification: null, _eff: null }];
+    // Fallback: dispatch to the epicenter itself before any zone_update arrives
+    const fallback = [{
+      id: 'epicenter', name: 'Epicenter',
+      lat: epicenter.lat, lon: epicenter.lon,
+      classification: null, _eff: null,
+    }];
     const pool = targets.length > 0 ? targets : fallback;
 
     const entries = [];
-    let poolIdx = 0;   // round-robin pointer across all units globally
 
-    RESPONDERS.forEach((resp, ri) => {
+    RESPONDER_TYPES.forEach((resp, ri) => {
+      // Each responder type sends at most `maxUnits` units, fanning out across
+      // priority zones in worst-first order. Each unit ALWAYS deploys from the
+      // station nearest to its assigned destination.
       for (let di = 0; di < resp.maxUnits; di++) {
-        const zone = pool[poolIdx % pool.length];
-        poolIdx++;
-
+        const zone = pool[di % pool.length];
         const clsForColor = zone._eff ?? zone.classification;
+        const station = nearestStation(resp.id, zone.lat, zone.lon);
+
         const dest = {
           id:             zone.id,
           label:          zone.name || zone.label || zone.id,
@@ -171,16 +224,16 @@ export default function EmergencyRoutes({ epicenter, active, zones = [], onRoute
         };
 
         entries.push({
-          key:        rkey(resp.id, dest.id),
-          respId:     resp.id,
-          label:      resp.label,
-          emoji:      resp.emoji,
-          unitIdx:    di,
-          color:      clsToColor(clsForColor),
-          origin:     { lat: resp.lat, lon: resp.lon },
+          key:         rkey(resp.id, station.id, dest.id),
+          respId:      resp.id,
+          label:       resp.label,
+          emoji:       resp.emoji,
+          unitIdx:     di,
+          color:       clsToColor(clsForColor),
+          origin:      { id: station.id, name: station.name, lat: station.lat, lon: station.lon },
           dest,
-          startDelay: ri * 700 + di * 400,
-          fetchDelay: ri * 600 + di * 300,
+          startDelay:  ri * 700 + di * 400,
+          fetchDelay:  ri * 600 + di * 300,
         });
       }
     });
@@ -229,7 +282,9 @@ export default function EmergencyRoutes({ epicenter, active, zones = [], onRoute
         [entry.key]: {
           ...(prev[entry.key] ?? {}), loading: true, error: null,
           respId: entry.respId, label: entry.label, emoji: entry.emoji,
-          unitIdx: entry.unitIdx, color: entry.color, destLabel: entry.dest.label
+          unitIdx: entry.unitIdx, color: entry.color,
+          destLabel: entry.dest.label,
+          originName: entry.origin.name,
         },
       }));
 
@@ -246,6 +301,7 @@ export default function EmergencyRoutes({ epicenter, active, zones = [], onRoute
             label:       entry.label,
             emoji:       entry.emoji,
             unitIdx:     entry.unitIdx,
+            originName:  entry.origin.name,
             destLabel:   entry.dest.label,
             destClass:   entry.dest.classification,
             etaMinutes:  route.etaMinutes,
@@ -316,7 +372,7 @@ export default function EmergencyRoutes({ epicenter, active, zones = [], onRoute
             </button>
           </div>
 
-          {RESPONDERS.filter((r) => grouped[r.id]).map((r) => {
+          {RESPONDER_TYPES.filter((r) => grouped[r.id]).map((r) => {
             const grp = grouped[r.id];
             return (
               <div key={r.id} className="eta-responder-group">
@@ -336,7 +392,9 @@ export default function EmergencyRoutes({ epicenter, active, zones = [], onRoute
                     />
                     <span className="eta-unit-label">
                       Unit {i + 1}
-                      <span className="eta-dest-name"> → {unit.destLabel}</span>
+                      <span className="eta-dest-name">
+                        {unit.originName ? ` ${unit.originName} →` : ''} {unit.destLabel}
+                      </span>
                     </span>
                     <span className="eta-right">
                       {unit.loading && <span className="eta-loading">…</span>}

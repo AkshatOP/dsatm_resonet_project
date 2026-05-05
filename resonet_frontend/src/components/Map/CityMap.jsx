@@ -26,7 +26,14 @@ const ATTRIBUTION = '&copy; <a href="https://www.openstreetmap.org/copyright">Op
 const CENTER = [12.9716, 77.5946];
 const ZOOM   = 13;
 
-export default function CityMap({ zones, epicenter, onRouteReady }) {
+export default function CityMap({
+  zones,
+  epicenter,
+  onRouteReady,
+  onTriggerFire,
+  onTriggerEarthquake,
+  isSimulating,
+}) {
   const [hoveredZoneId, setHoveredZoneId] = useState(null);
 
   return (
@@ -59,6 +66,9 @@ export default function CityMap({ zones, epicenter, onRouteReady }) {
             epicenter={epicenter}
             isHighlighted={hoveredZoneId === zone.id}
             isDimmed={hoveredZoneId !== null && hoveredZoneId !== zone.id}
+            onTriggerFire={onTriggerFire}
+            onTriggerEarthquake={onTriggerEarthquake}
+            isSimulating={isSimulating}
           />
         ))}
 

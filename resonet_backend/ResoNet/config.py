@@ -175,6 +175,34 @@ CITY_ZONES = [
     },
 ]
 
+# --- Responder Stations (multi-location dispatch registry) ---
+# Each responder type has 2-3 physical stations distributed geographically
+# (north / south / east / west) so dispatch goes from the *closest* station
+# to the disaster epicenter. Both backend (sensing_agent) and frontend
+# (EmergencyRoutes.jsx) read from these coordinates — they MUST stay in sync.
+RESPONDER_LOCATIONS = {
+    "hospital": [
+        {"id": "HOSP-E", "name": "Hebbal Medical Centre",          "lat": 13.030, "lon": 77.660},
+        {"id": "HOSP-W", "name": "Magadi West Medical Centre",     "lat": 12.985, "lon": 77.460},
+        {"id": "HOSP-N", "name": "Yelahanka District Hospital",    "lat": 13.055, "lon": 77.530},
+    ],
+    "fire": [
+        {"id": "FIRE-E", "name": "Banaswadi Fire Station",         "lat": 12.908, "lon": 77.640},
+        {"id": "FIRE-W", "name": "Magadi Road Fire Station",       "lat": 12.968, "lon": 77.450},
+        {"id": "FIRE-S", "name": "Kanakapura Fire Station",        "lat": 12.870, "lon": 77.560},
+    ],
+    "police": [
+        {"id": "POL-C",  "name": "Central Police HQ",              "lat": 12.971, "lon": 77.594},
+        {"id": "POL-W",  "name": "West Bangalore Police HQ",       "lat": 13.000, "lon": 77.480},
+        {"id": "POL-S",  "name": "South Bangalore Police HQ",      "lat": 12.890, "lon": 77.530},
+    ],
+    "ndrf": [
+        {"id": "NDRF-E", "name": "Hebbal NDRF Rapid Response",     "lat": 12.985, "lon": 77.662},
+        {"id": "NDRF-W", "name": "Nelamangala NDRF Base",          "lat": 12.945, "lon": 77.460},
+        {"id": "NDRF-N", "name": "Yelahanka NDRF Base",            "lat": 13.060, "lon": 77.580},
+    ],
+}
+
 # --- Demo Earthquake Seed ---
 DEMO_EARTHQUAKE = {
     "epicenter_lat": 12.97,

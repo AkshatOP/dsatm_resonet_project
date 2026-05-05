@@ -69,7 +69,15 @@ const CLS_COLOURS = {
 };
 
 /* ── Component ────────────────────────────────────────────────────── */
-export default function ZoneCircle({ zone, epicenter, isHighlighted = false, isDimmed = false }) {
+export default function ZoneCircle({
+  zone,
+  epicenter,
+  isHighlighted = false,
+  isDimmed = false,
+  onTriggerFire,
+  onTriggerEarthquake,
+  isSimulating = false,
+}) {
   const {
     id, name, lat, lon,
     population_density = 0.5,
@@ -79,6 +87,15 @@ export default function ZoneCircle({ zone, epicenter, isHighlighted = false, isD
     power_status,
     road_blocked,
   } = zone;
+
+  const handleFire = (e) => {
+    e?.stopPropagation?.();
+    onTriggerFire?.(lat, lon, id);
+  };
+  const handleEarthquake = (e) => {
+    e?.stopPropagation?.();
+    onTriggerEarthquake?.(lat, lon, id);
+  };
 
   // Distance-based classification overrides backend when earthquake is active
   const effectiveClass = epicenter ? quakeClass(lat, lon, epicenter) : classification;
@@ -179,6 +196,46 @@ export default function ZoneCircle({ zone, epicenter, isHighlighted = false, isD
               {has_critical_infra ? '🏛️ Yes' : 'No'}
             </span>
           </div>
+
+          {(onTriggerFire || onTriggerEarthquake) && (
+            <div className="pt-2 mt-1 border-t border-white/10 space-y-1.5">
+              <p className="text-[10px] uppercase tracking-widest text-gray-500">
+                Simulate calamity here
+              </p>
+              <div className="grid grid-cols-2 gap-1.5">
+                {onTriggerFire && (
+                  <button
+                    type="button"
+                    onClick={handleFire}
+                    disabled={isSimulating}
+                    className={`group relative flex items-center justify-center gap-1 px-2 py-1.5 rounded-md text-[11px] font-semibold transition-all duration-200 backdrop-blur-sm border ${
+                      isSimulating
+                        ? 'bg-orange-900/30 border-orange-900/40 text-orange-300/60 cursor-not-allowed'
+                        : 'bg-gradient-to-br from-orange-500/90 to-red-600/90 border-orange-400/40 text-white hover:from-orange-400 hover:to-red-500 hover:border-orange-300 hover:shadow-[0_0_12px_rgba(251,146,60,0.5)] active:scale-95'
+                    }`}
+                  >
+                    <span className="text-sm leading-none">🔥</span>
+                    <span>Fire</span>
+                  </button>
+                )}
+                {onTriggerEarthquake && (
+                  <button
+                    type="button"
+                    onClick={handleEarthquake}
+                    disabled={isSimulating}
+                    className={`group relative flex items-center justify-center gap-1 px-2 py-1.5 rounded-md text-[11px] font-semibold transition-all duration-200 backdrop-blur-sm border ${
+                      isSimulating
+                        ? 'bg-red-900/30 border-red-900/40 text-red-300/60 cursor-not-allowed'
+                        : 'bg-gradient-to-br from-red-600/90 to-rose-900/90 border-red-500/40 text-white hover:from-red-500 hover:to-rose-800 hover:border-red-400 hover:shadow-[0_0_12px_rgba(239,68,68,0.5)] active:scale-95'
+                    }`}
+                  >
+                    <span className="text-sm leading-none">🌋</span>
+                    <span>Earthquake</span>
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       </Popup>
     </CircleMarker>

@@ -21,27 +21,38 @@ const CFG = {
   hospital:    { emoji: '🏥', color: '#f472b6', label: 'Hospital'             },
   fire:        { emoji: '🚒', color: '#fb923c', label: 'Fire Station'          },
   ndrf:        { emoji: '🪖', color: '#4ade80', label: 'NDRF Base'            },
+  police:      { emoji: '🚓', color: '#60a5fa', label: 'Police HQ'            },
   air_rescue:  { emoji: '🚁', color: '#38bdf8', label: 'Air Rescue / Helipad' },
   land_rescue: { emoji: '🚑', color: '#a78bfa', label: 'Land Rescue Centre'   },
 };
 
-// All sites are deliberately placed outside the affected zone cluster
+// All sites are deliberately placed outside the affected zone cluster.
+// The hospital/fire/police/ndrf coordinates MUST mirror EmergencyRoutes.STATIONS
+// and backend config.RESPONDER_LOCATIONS so the visible icon = dispatch origin.
 const INFRA_SITES = [
-  // ── East corridor (lon 77.63+, well right of all zone dots) ──────────
-  { type: 'hospital',    lat: 13.030,  lon: 77.660, name: 'Hebbal Medical Centre'            },
-  { type: 'ndrf',        lat: 12.985,  lon: 77.662, name: 'Hebbal NDRF Rapid Response'       },
-  { type: 'fire',        lat: 12.908,  lon: 77.640, name: 'Banaswadi Fire Station'            },
+  // ── Hospitals (E / W / N) ─────────────────────────────────────────────
+  { type: 'hospital', lat: 13.030, lon: 77.660, name: 'Hebbal Medical Centre' },
+  { type: 'hospital', lat: 12.985, lon: 77.460, name: 'Magadi West Medical Centre' },
+  { type: 'hospital', lat: 13.055, lon: 77.530, name: 'Yelahanka District Hospital' },
 
-  // ── West corridor (lon 77.43–77.46, well left of all zone dots) ──────
-  { type: 'fire',        lat: 12.968,  lon: 77.450, name: 'Magadi Road Fire Station'          },
-  { type: 'land_rescue', lat: 13.025,  lon: 77.443, name: 'Nelamangala Rescue Centre'         },
+  // ── Fire stations (E / W / S) ────────────────────────────────────────
+  { type: 'fire',     lat: 12.908, lon: 77.640, name: 'Banaswadi Fire Station' },
+  { type: 'fire',     lat: 12.968, lon: 77.450, name: 'Magadi Road Fire Station' },
+  { type: 'fire',     lat: 12.870, lon: 77.560, name: 'Kanakapura Fire Station' },
 
-  // ── Far south (lat 12.85–12.87, below Zone-L at 12.889) ─────────────
-  { type: 'air_rescue',  lat: 12.855,  lon: 77.555, name: 'Kanakapura Air Rescue Base'       },
-  { type: 'land_rescue', lat: 12.863,  lon: 77.470, name: 'Bidadi Land Rescue Centre'         },
+  // ── Police HQs (C / W / S) ───────────────────────────────────────────
+  { type: 'police',   lat: 12.971, lon: 77.594, name: 'Central Police HQ' },
+  { type: 'police',   lat: 13.000, lon: 77.480, name: 'West Bangalore Police HQ' },
+  { type: 'police',   lat: 12.890, lon: 77.530, name: 'South Bangalore Police HQ' },
 
-  // ── Far north (lat 13.05+, above Zone-C at 13.025) ──────────────────
-  { type: 'hospital',    lat: 13.055,  lon: 77.530, name: 'Yelahanka District Hospital'       },
+  // ── NDRF bases (E / W / N) ───────────────────────────────────────────
+  { type: 'ndrf',     lat: 12.985, lon: 77.662, name: 'Hebbal NDRF Rapid Response' },
+  { type: 'ndrf',     lat: 12.945, lon: 77.460, name: 'Nelamangala NDRF Base' },
+  { type: 'ndrf',     lat: 13.060, lon: 77.580, name: 'Yelahanka NDRF Base' },
+
+  // ── Auxiliary rescue assets (kept from prior layout) ─────────────────
+  { type: 'air_rescue',  lat: 12.855, lon: 77.555, name: 'Kanakapura Air Rescue Base' },
+  { type: 'land_rescue', lat: 12.863, lon: 77.470, name: 'Bidadi Land Rescue Centre' },
 ];
 
 function makeIcon(type) {

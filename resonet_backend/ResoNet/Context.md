@@ -125,9 +125,57 @@ dispatch:
   # Trigger scenario
   curl -X POST http://localhost:8000/simulate/scenario/hospital-earthquake
 
+  # Trigger at any zone (lat/lon/zone_id all optional)
+  curl -X POST http://localhost:8000/simulate/scenario/hospital-earthquake \
+       -H 'Content-Type: application/json' \
+       -d '{"lat": 13.0245, "lon": 77.5503, "zone_id": "Zone-C"}'
+  curl -X POST http://localhost:8000/simulate/scenario/fire \
+       -H 'Content-Type: application/json' \
+       -d '{"lat": 12.9085, "lon": 77.4842, "zone_id": "Zone-F"}'
+
   # Reset and re-run without restarting
   curl -X POST http://localhost:8000/simulate/reset
   curl -X POST http://localhost:8000/simulate/scenario/hospital-earthquake
 ```
+
+## Build Log Continued
+
+[2026-05-05 — DYNAMIC LOCALIZED CALAMITY DISPATCH]
+  PROBLEM: fire was hardcoded to Zone-I, earthquake to Zone-D, hospital_agent
+  was pinned to Zone-B regardless of where damage actually occurred, and all
+  routes originated from a single station per responder type.
+  CHANGES:
+  - config.py:
+      • Added RESPONDER_LOCATIONS dict (3 stations × 4 responder types =
+        12 stations total, distributed N/S/E/W). Mirrored exactly on the
+        frontend in EmergencyRoutes.STATIONS and InfraMarker.INFRA_SITES.
+  - api/routes.py:
+      • EarthquakeBody and FireBody now accept optional zone_id alongside
+        existing lat/lon/magnitude/intensity/radius_km.
+      • POST /simulate/earthquake now returns the full scenario shape
+        (epicenter_zone, calamity_type, etc.) so frontend epicenter setup
+        works identically to the scenario endpoint.
+      • POST /simulate/scenario/hospital-earthquake reads body when supplied,
+        falls back to demo seed (with ± randomisation) when omitted.
+      • POST /simulate/scenario/fire reads zone_id from body and echoes it
+        in the response under epicenter_zone.
+  - agents/sensing_agent.py:
+      • Added _nearest_station(resp_type, lat, lon) helper using haversine.
+      • _trigger_rfps() rewritten: removed Zone-B hardcode, removed the
+        FIRE/EARTHQUAKE branching for hospital. Now both calamity types
+        run the same generalized loop:
+            fire+police → every CRITICAL/HIGH zone
+            hospital    → every CRITICAL/HIGH zone whose power is OUT
+            ndrf        → every CRITICAL zone
+        Each dispatch logs the nearest physical station (mirrors what the
+        frontend draws AnimatedRoutes from).
+  INVARIANTS PRESERVED:
+  - _EQ_BANDS_M (3600/7000/11000) and _FIRE_BANDS_M (500/500/2500) unchanged.
+  - Distance-based zone classification in _common_pipeline unchanged.
+  - decision_id and routing dedup logic on the frontend untouched.
+  RESULT: Click any zone popup → "Simulate Fire" / "Simulate Earthquake"
+  buttons send that zone's coordinates as the epicenter. Backend identifies
+  CRITICAL/HIGH zones from the new epicenter and dispatches each responder
+  type from its nearest station.
 
 ---

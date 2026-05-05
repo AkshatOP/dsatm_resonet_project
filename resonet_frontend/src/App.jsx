@@ -326,34 +326,38 @@ export default function App() {
 
   /* ── Route-ready — fired by EmergencyRoutes when each OSRM fetch resolves ── */
   const handleRouteReady = useCallback((info) => {
-    const { respId, label, emoji, unitIdx, destLabel, destClass, etaMinutes, distanceKm, hasDanger } = info;
+    const { respId, label, emoji, unitIdx, originName, destLabel, destClass,
+            etaMinutes, distanceKm, hasDanger } = info;
 
-    // Dedup: one bubble per (respId, unit index, destination)
-    const key = `route:${respId}:${unitIdx}:${destLabel}`;
+    // Dedup: include origin so the same responder can fire bubbles for
+    // different stations covering different destinations.
+    const key = `route:${respId}:${unitIdx}:${originName ?? '?'}:${destLabel}`;
     if (seenDecisions.current.has(key)) return;
     seenDecisions.current.add(key);
+
+    const fromBit = originName ? ` from ${originName}` : '';
 
     // Chat bubble — unique message per responder type
     const MESSAGES = {
       hospital: [
-        `🏥 Ambulance Unit ${unitIdx + 1} en route to ${destLabel}.`,
+        `🏥 Ambulance Unit ${unitIdx + 1}${fromBit} en route to ${destLabel}.`,
         `ETA ${etaMinutes} min · ${distanceKm} km${hasDanger ? ' · ⚠️ route passes through danger zone' : ''} · Medical team on standby.`,
       ],
       ndrf:     [
-        `🪖 NDRF Unit ${unitIdx + 1} deploying to ${destLabel}.`,
+        `🪖 NDRF Unit ${unitIdx + 1}${fromBit} deploying to ${destLabel}.`,
         `ETA ${etaMinutes} min · ${distanceKm} km${hasDanger ? ' · ⚠️ danger zone on path' : ''} · Heavy rescue equipment loaded.`,
       ],
       fire:     [
-        `🚒 Fire Unit ${unitIdx + 1} responding to ${destLabel}.`,
+        `🚒 Fire Unit ${unitIdx + 1}${fromBit} responding to ${destLabel}.`,
         `ETA ${etaMinutes} min · ${distanceKm} km${hasDanger ? ' · ⚠️ active fire zone ahead' : ''} · Water tanker + suppression crew dispatched.`,
       ],
       police:   [
-        `🚓 Police Unit ${unitIdx + 1} en route to ${destLabel} for crowd control.`,
+        `🚓 Police Unit ${unitIdx + 1}${fromBit} en route to ${destLabel} for crowd control.`,
         `ETA ${etaMinutes} min · ${distanceKm} km${hasDanger ? ' · ⚠️ route through incident zone' : ''} · Perimeter establishment protocol active.`,
       ],
     };
     const [text, subtext] = MESSAGES[respId] ?? [
-      `${emoji} ${label} Unit ${unitIdx + 1} dispatched to ${destLabel}.`,
+      `${emoji} ${label} Unit ${unitIdx + 1}${fromBit} dispatched to ${destLabel}.`,
       `ETA ${etaMinutes} min · ${distanceKm} km`,
     ];
 
@@ -411,22 +415,24 @@ export default function App() {
   }, []);
 
   /* ── Trigger — push immediate power_agent alert, then fire simulation ── */
-  const handleTrigger = useCallback(async () => {
+  const handleTrigger = useCallback(async (lat, lon, zone_id) => {
+    const zoneLabel = zone_id ?? 'all sectors';
     pushMsg(makeMsg(
       'request', 'power_agent',
-      'Seismic activity detected. Initiating emergency power grid monitoring across all sectors.',
+      `Seismic activity detected${zone_id ? ` near ${zoneLabel}` : ''}. Initiating emergency power grid monitoring across all sectors.`,
       'Scanning grid integrity — standby for sector status report.',
     ));
-    await triggerEarthquake();
+    await triggerEarthquake({ lat, lon, zone_id });
   }, [triggerEarthquake, pushMsg]);
 
-  const handleTriggerFire = useCallback(async () => {
+  const handleTriggerFire = useCallback(async (lat, lon, zone_id) => {
+    const zoneLabel = zone_id ? ` in ${zone_id}` : ' in Zone-I (Mahalakshmi Layout)';
     pushMsg(makeMsg(
       'request', 'fire_agent',
-      '🔥 Fire outbreak reported in Zone-I (Mahalakshmi Layout). Dispatching emergency units.',
+      `🔥 Fire outbreak reported${zoneLabel}. Dispatching emergency units.`,
       'Alerting Fire, Police, and Ambulance — initiating response protocol.',
     ));
-    await triggerFire();
+    await triggerFire({ lat, lon, zone_id });
   }, [triggerFire, pushMsg]);
 
   /* ── Reset ────────────────────────────────────────────────────── */
@@ -500,7 +506,14 @@ export default function App() {
 
         {/* Map */}
         <main className="flex-1 relative">
-          <CityMap zones={zones} epicenter={epicenter} onRouteReady={handleRouteReady} />
+          <CityMap
+            zones={zones}
+            epicenter={epicenter}
+            onRouteReady={handleRouteReady}
+            onTriggerFire={handleTriggerFire}
+            onTriggerEarthquake={handleTrigger}
+            isSimulating={isSimulating}
+          />
         </main>
       </div>
 

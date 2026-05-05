@@ -1,22 +1,38 @@
 /**
  * useSimulation.js
  * Handles trigger and reset API calls.
- * Returns { triggerEarthquake, triggerFire, resetSystem, isSimulating }
+ *
+ * triggerEarthquake({ lat, lon, zone_id }) and triggerFire({ lat, lon, zone_id })
+ * accept an optional epicenter — when omitted, the backend falls back to its
+ * pre-seeded demo coordinates. Pass a zone's coordinates from a popup click to
+ * place the disaster anywhere on the map.
+ *
+ * Returns { triggerEarthquake, triggerFire, resetSystem, isSimulating, lastEvent }
  */
 
 import { useState, useCallback } from 'react';
 import { ENDPOINTS } from '../constants/api';
 
+async function postJson(url, body) {
+  const opts = { method: 'POST', headers: { 'Content-Type': 'application/json' } };
+  if (body && Object.keys(body).length > 0) opts.body = JSON.stringify(body);
+  const res = await fetch(url, opts);
+  return res.json();
+}
+
 export function useSimulation() {
   const [isSimulating, setIsSimulating] = useState(false);
   const [lastEvent, setLastEvent] = useState(null);
 
-  const triggerEarthquake = useCallback(async () => {
+  const triggerEarthquake = useCallback(async (opts = {}) => {
     if (isSimulating) return;
     setIsSimulating(true);
     try {
-      const res  = await fetch(ENDPOINTS.simulate, { method: 'POST' });
-      const data = await res.json();
+      const body = {};
+      if (opts.lat     != null) body.lat     = opts.lat;
+      if (opts.lon     != null) body.lon     = opts.lon;
+      if (opts.zone_id != null) body.zone_id = opts.zone_id;
+      const data = await postJson(ENDPOINTS.simulate, body);
       setLastEvent(data);
       console.log('[SIM] Triggered earthquake:', data);
       // Simulation done signal comes via WebSocket events.
@@ -29,12 +45,15 @@ export function useSimulation() {
     }
   }, [isSimulating]);
 
-  const triggerFire = useCallback(async () => {
+  const triggerFire = useCallback(async (opts = {}) => {
     if (isSimulating) return;
     setIsSimulating(true);
     try {
-      const res  = await fetch(ENDPOINTS.simulateFire, { method: 'POST' });
-      const data = await res.json();
+      const body = {};
+      if (opts.lat     != null) body.lat     = opts.lat;
+      if (opts.lon     != null) body.lon     = opts.lon;
+      if (opts.zone_id != null) body.zone_id = opts.zone_id;
+      const data = await postJson(ENDPOINTS.simulateFire, body);
       setLastEvent(data);
       console.log('[SIM] Triggered fire:', data);
       setTimeout(() => setIsSimulating(false), 15000);
@@ -61,4 +80,3 @@ export function useSimulation() {
 
   return { triggerEarthquake, triggerFire, resetSystem, isSimulating, lastEvent };
 }
-

@@ -268,6 +268,54 @@ AERIAL: dashed red/orange polyline, 2px, curved arc;
     police:   -8 personnel, -1 vehicle
   VERIFIED: npm run build → 0 errors. 74 modules.
 
+[2026-05-05 — DYNAMIC LOCALIZED CALAMITY DISPATCH] —
+  Replaced hardcoded fire@Zone-I and earthquake@Zone-D demo seeds with click-to-trigger
+  popups on every zone, plus nearest-neighbor responder dispatch from multiple stations.
+  - Map/ZoneCircle.jsx: Popup gained a "Simulate calamity here" footer with two
+      glassmorphism buttons — 🔥 Fire (orange→red gradient, hover glow) and
+      🌋 Earthquake (red→rose gradient, hover glow). Both call onTriggerFire/
+      onTriggerEarthquake props with (zone.lat, zone.lon, zone.id). Disabled
+      while isSimulating with reduced opacity. Hover transitions, active scale-95.
+  - hooks/useSimulation.js: triggerEarthquake({lat,lon,zone_id}) and triggerFire(...)
+      now accept an opts object. Body posted as JSON. Empty opts → demo seed.
+  - App.jsx: handleTrigger / handleTriggerFire forward (lat, lon, zone_id) to
+      useSimulation. Zone label shown in the immediate power_agent / fire_agent
+      chat bubble. CityMap receives onTriggerFire / onTriggerEarthquake / isSimulating.
+      handleRouteReady dedup key now includes originName so different stations of
+      the same responder type can each fire bubbles for their own destinations.
+  - Map/CityMap.jsx: passes onTriggerFire/onTriggerEarthquake/isSimulating down
+      to every ZoneCircle.
+  - Map/EmergencyRoutes.jsx: deleted the single-position RESPONDERS array. New:
+      • RESPONDER_TYPES (id/label/emoji/maxUnits) — type-level config only.
+      • STATIONS — dict mapping each responder type to a list of 3 stations
+        (mirrors backend config.RESPONDER_LOCATIONS exactly).
+      • nearestStation(respType, destLat, destLon) — haversine over the type's
+        station list, returns the closest one.
+      • plan useMemo: for every CRITICAL/HIGH destination zone (worst-first),
+        each responder type dispatches up to maxUnits from the station nearest
+        to that destination. Route key now includes station id so the same
+        responder can have parallel routes from different origins.
+      • ETA panel: each unit row shows "OriginName → DestName" instead of just
+        "→ DestName" so dispatch origin is visible.
+      • onRouteReady payload gained originName so chat bubbles can say
+        "from Hebbal Medical Centre".
+  - Map/InfraMarker.jsx: replaced ad-hoc 8-site list with the same 12 stations
+      (3 hospitals + 3 fire + 3 police + 3 NDRF) used by EmergencyRoutes.
+      Added 'police' icon CFG entry (🚓, blue). Auxiliary air_rescue and
+      land_rescue markers retained for visual richness.
+  - Sidebar/Controls.jsx: fire button label now reads "Simulate Fire (Demo)"
+      since per-zone fire is the canonical path.
+  INVARIANTS PRESERVED:
+  - EQ_BANDS_M / FIRE_BANDS_M unchanged.
+  - effectiveClass(zone, epicenter) and getTargetZones() untouched.
+  - decision_id and routing dedup logic preserved (with origin extension).
+  STATIONS REGISTRY (must mirror backend config.RESPONDER_LOCATIONS):
+    hospital → Hebbal Medical Centre (E) | Magadi West Medical Centre (W) | Yelahanka District Hospital (N)
+    fire     → Banaswadi Fire Station (E) | Magadi Road Fire Station (W) | Kanakapura Fire Station (S)
+    police   → Central Police HQ (C) | West Bangalore Police HQ (W) | South Bangalore Police HQ (S)
+    ndrf     → Hebbal NDRF Rapid Response (E) | Nelamangala NDRF Base (W) | Yelahanka NDRF Base (N)
+  VERIFIED: npm run build → 0 errors, 74 modules.
+
 [2026-05-05 09:29] POWER OVERLAY FIRE FIX —
   PROBLEM: PowerOverlay hardcoded power-loss radius = 7000m for all calamity types.
   During a fire at Zone-I, this blanked out ALL blue city-light dots within 7km —

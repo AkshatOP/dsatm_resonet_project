@@ -30,6 +30,7 @@ class EarthquakeBody(BaseModel):
     lat: Optional[float] = None
     lon: Optional[float] = None
     magnitude: Optional[float] = None
+    zone_id: Optional[str] = None
 
 
 class FireBody(BaseModel):
@@ -37,6 +38,7 @@ class FireBody(BaseModel):
     lon: Optional[float] = None
     intensity: Optional[float] = None
     radius_km: Optional[float] = None
+    zone_id: Optional[str] = None
 
 
 class PriorityBody(BaseModel):
@@ -91,38 +93,62 @@ async def get_zones(request: Request) -> Dict[str, Any]:
 
 @router.post("/simulate/earthquake")
 async def simulate_earthquake(request: Request, body: EarthquakeBody = EarthquakeBody()) -> Dict[str, Any]:
-    """Trigger a full earthquake simulation cycle."""
+    """
+    Trigger a full earthquake simulation cycle. Caller can supply lat/lon/zone_id
+    from any zone popup — when omitted, falls back to the demo seed.
+    """
     state = request.app.state
     lat = body.lat if body.lat is not None else config.DEMO_EARTHQUAKE["epicenter_lat"]
     lon = body.lon if body.lon is not None else config.DEMO_EARTHQUAKE["epicenter_lon"]
     magnitude = body.magnitude if body.magnitude is not None else config.DEMO_EARTHQUAKE["magnitude"]
+    zone_id = body.zone_id if body.zone_id is not None else config.DEMO_EARTHQUAKE["epicenter_zone"]
 
     event = _simulator.generate_event(lat, lon, magnitude)
     # Call process_event directly — broker publish is for external consumers only
     await state.sensing_agent.process_event(event)
 
-    return {"event_id": event.event_id, "magnitude": magnitude, "lat": lat, "lon": lon}
+    return {
+        "scenario": "earthquake",
+        "event_id": event.event_id,
+        "calamity_type": "EARTHQUAKE",
+        "epicenter_zone": zone_id,
+        "magnitude": magnitude,
+        "epicenter_lat": lat,
+        "epicenter_lon": lon,
+    }
 
 
 @router.post("/simulate/scenario/hospital-earthquake")
-async def simulate_hospital_earthquake(request: Request) -> Dict[str, Any]:
+async def simulate_hospital_earthquake(
+    request: Request, body: EarthquakeBody = EarthquakeBody()
+) -> Dict[str, Any]:
     """
-    Trigger the pre-seeded demo scenario with slight randomisation each run.
-    Magnitude varies ±0.3, epicenter shifts ±0.015 degrees — enough to produce
-    different severity scores, RFP amounts, and Gini values every time.
+    Trigger an earthquake scenario. If lat/lon/zone_id are supplied (e.g. from
+    a zone popup click), the epicenter is fixed there. Otherwise the pre-seeded
+    demo seed is used with slight ± randomisation so each run varies.
     """
     import random
     state = request.app.state
     demo = config.DEMO_EARTHQUAKE
-    magnitude = round(demo["magnitude"] + random.uniform(-0.3, 0.3), 1)
-    lat = round(demo["epicenter_lat"] + random.uniform(-0.015, 0.015), 4)
-    lon = round(demo["epicenter_lon"] + random.uniform(-0.015, 0.015), 4)
+
+    if body.lat is not None and body.lon is not None:
+        lat = body.lat
+        lon = body.lon
+        zone_id = body.zone_id or demo["epicenter_zone"]
+        magnitude = body.magnitude if body.magnitude is not None else demo["magnitude"]
+    else:
+        magnitude = round(demo["magnitude"] + random.uniform(-0.3, 0.3), 1)
+        lat = round(demo["epicenter_lat"] + random.uniform(-0.015, 0.015), 4)
+        lon = round(demo["epicenter_lon"] + random.uniform(-0.015, 0.015), 4)
+        zone_id = demo["epicenter_zone"]
+
     event = _simulator.generate_event(lat, lon, magnitude)
     await state.sensing_agent.process_event(event)
     return {
         "scenario": "hospital-earthquake",
         "event_id": event.event_id,
-        "epicenter_zone": demo["epicenter_zone"],
+        "calamity_type": "EARTHQUAKE",
+        "epicenter_zone": zone_id,
         "magnitude": magnitude,
         "epicenter_lat": lat,
         "epicenter_lon": lon,
@@ -133,7 +159,8 @@ async def simulate_hospital_earthquake(request: Request) -> Dict[str, Any]:
 async def simulate_fire(request: Request, body: FireBody = FireBody()) -> Dict[str, Any]:
     """
     Trigger a fire simulation with steep severity falloff.
-    Defaults to Zone-I (Mahalakshmi Layout) if no coordinates provided.
+    Caller can supply lat/lon/zone_id from any zone popup; falls back to the
+    demo seed (Zone-I / Mahalakshmi Layout) when omitted.
     """
     state = request.app.state
     demo = config.DEMO_FIRE
@@ -141,6 +168,7 @@ async def simulate_fire(request: Request, body: FireBody = FireBody()) -> Dict[s
     lon       = body.lon       if body.lon       is not None else demo["epicenter_lon"]
     intensity = body.intensity if body.intensity is not None else demo["intensity"]
     radius_km = body.radius_km if body.radius_km is not None else demo["radius_km"]
+    zone_id   = body.zone_id   if body.zone_id   is not None else demo["epicenter_zone"]
 
     event = _fire_simulator.generate_event(lat, lon, intensity, radius_km)
     await state.sensing_agent.process_fire_event(event)
@@ -149,7 +177,7 @@ async def simulate_fire(request: Request, body: FireBody = FireBody()) -> Dict[s
         "scenario": "fire",
         "event_id": event.event_id,
         "calamity_type": "FIRE",
-        "epicenter_zone": demo["epicenter_zone"],
+        "epicenter_zone": zone_id,
         "intensity": intensity,
         "radius_km": radius_km,
         "epicenter_lat": lat,
