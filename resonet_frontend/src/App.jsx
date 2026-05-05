@@ -107,16 +107,16 @@ export default function App() {
 
   /* ── Power batch flush — fires after all zone_update events settle ── */
   const flushPowerBatch = useCallback(() => {
-    const { off, on } = powerBatchRef.current;
+    const { off } = powerBatchRef.current;
     powerBatchRef.current = { off: [], on: [] };
     if (off.length === 0) return;
 
-    const offList  = off.join(', ');
-    const onCount  = on.length;
+    // Stable count = total city zones minus the impact zones that lost power
+    const stableCount = 12 - off.length;
     pushMsg(makeMsg(
       'award', 'power_agent',
-      `Grid failure confirmed — ${off.length} sector${off.length > 1 ? 's' : ''} offline: ${offList}.`,
-      `Emergency load shedding active. ${onCount} sector${onCount !== 1 ? 's' : ''} maintaining stable supply.`,
+      `Grid failure confirmed — ${off.length} sector${off.length > 1 ? 's' : ''} offline: ${off.join(', ')}.`,
+      `Emergency load shedding active. ${stableCount} sector${stableCount !== 1 ? 's' : ''} maintaining stable supply.`,
       { badge: 'OFFLINE' },
     ));
   }, [pushMsg]);
@@ -137,11 +137,13 @@ export default function App() {
         : z
     ));
 
-    // Track power status changes for the power_agent chat message
-    if (power_status === false && !powerBatchRef.current.off.includes(zone_id)) {
+    // Track power losses only for zones in the earthquake impact area (CRITICAL/HIGH).
+    // The backend sends power_status:false for ALL zones, so we filter by classification
+    // to match the 7 km power-loss radius used by PowerOverlay on the map.
+    if (power_status === false &&
+        ['CRITICAL', 'HIGH'].includes(classification) &&
+        !powerBatchRef.current.off.includes(zone_id)) {
       powerBatchRef.current.off.push(zone_id);
-    } else if (power_status === true && !powerBatchRef.current.on.includes(zone_id)) {
-      powerBatchRef.current.on.push(zone_id);
     }
     clearTimeout(powerBatchTimerRef.current);
     // Flush slightly after zone batch (900 ms) so power msg appears after zone alert

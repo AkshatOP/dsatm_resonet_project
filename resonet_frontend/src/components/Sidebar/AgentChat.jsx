@@ -88,6 +88,7 @@ const BADGE_CLS = {
   AWARDED: 'bg-green-800/70 text-green-300',
   AERIAL:  'bg-sky-800/70   text-sky-300',
   LAND:    'bg-blue-800/70  text-blue-300',
+  OFFLINE: 'bg-red-900/80   text-red-300',
 };
 function Badge({ label }) {
   return (
