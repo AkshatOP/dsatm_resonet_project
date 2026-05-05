@@ -41,6 +41,7 @@ AGENT_INITIAL_RESOURCES = {
         "power_units": 50,
         "beds": 300,
         "personnel": 80,
+        "ambulances": 10,
     },
     "fire": {
         "vehicles": 12,

@@ -30,7 +30,7 @@ const MAX_MSGS = 80;
 /* ── Initial resource pools (mirrors backend config.py) ────────── */
 const INITIAL_POOLS = {
   power_agent:    { power_units: 200 },
-  hospital_agent: { power_units: 50, beds: 300, personnel: 80 },
+  hospital_agent: { power_units: 50, beds: 300, personnel: 80, ambulances: 10 },
   fire_agent:     { vehicles: 12, personnel: 60, water_units: 500 },
   police_agent:   { personnel: 100, vehicles: 20 },
   ndrf_agent:     { heavy_equipment: 15, personnel: 120, aerial_units: 4 },
@@ -46,7 +46,7 @@ const RESP_AGENT = {
 
 /* cost per unit deployed — deducted once per route when OSRM resolves */
 const DEPLOY_COST = {
-  hospital: { personnel: 8,  beds: 10 },
+  hospital: { personnel: 8,  beds: 10, ambulances: 1 },
   ndrf:     { personnel: 12, heavy_equipment: 1 },
   fire:     { personnel: 6,  vehicles: 1, water_units: 30 },
   police:   { personnel: 8,  vehicles: 1 },
@@ -220,6 +220,9 @@ export default function App() {
     const { decision_id, resource_type, requester, winner,
             amount_awarded, gini_before, gini_after, bids_count } = payload;
 
+    // ── Skip 0-unit awards — completely pointless to announce
+    if (!amount_awarded || amount_awarded === 0) return;
+
     // Dedup — StrictMode / reconnect can fire the same event twice
     if (seenDecisions.current.has(decision_id)) return;
     seenDecisions.current.add(decision_id);
@@ -278,25 +281,79 @@ export default function App() {
       });
     }
 
+    // ── Build population-density-aware zone deployment breakdown ───
+    // Pull current zones from state snapshot for distribution message.
+    // We derive a subtext explaining *which* zones the units go to.
+    const buildDeploySubtext = () => {
+      const currentZones = zones; // closure over state
+      const affectedZones = currentZones.filter((z) =>
+        z.classification === 'CRITICAL' || z.classification === 'HIGH'
+      );
+
+      if (affectedZones.length === 0) {
+        const delta = ((gini_after ?? 0) - (gini_before ?? 0));
+        return `Gini: ${gini_before?.toFixed(3)} → ${gini_after?.toFixed(3)} (${delta >= 0 ? '+' : ''}${delta.toFixed(3)}) · ${bids_count ?? 1} bid${bids_count !== 1 ? 's' : ''}`;
+      }
+
+      // Weight each zone by population density × classification priority
+      const clsPriority = { CRITICAL: 1.0, HIGH: 0.5 };
+      const weighted = affectedZones.map((z) => ({
+        id: z.id,
+        cls: z.classification,
+        weight: (z.population_density ?? 0.5) * (clsPriority[z.classification] ?? 0.5),
+      }));
+      const totalWeight = weighted.reduce((s, z) => s + z.weight, 0);
+
+      // Allocate units proportionally (integer, min 1 per zone, sum = amount_awarded)
+      let remaining = amount_awarded;
+      const allocations = weighted.map((z, i) => {
+        if (i === weighted.length - 1) return { ...z, units: remaining };
+        const share = Math.max(1, Math.round((z.weight / totalWeight) * amount_awarded));
+        remaining = Math.max(1, remaining - share);
+        return { ...z, units: share };
+      });
+
+      // Group allocations by classification
+      const criticals = allocations.filter((z) => z.cls === 'CRITICAL');
+      const highs     = allocations.filter((z) => z.cls === 'HIGH');
+
+      const parts = [];
+      if (criticals.length > 0) {
+        const critUnits = criticals.reduce((s, z) => s + z.units, 0);
+        const critIds   = criticals.map((z) => z.id).join(', ');
+        parts.push(`${critUnits} → ${critIds} (CRITICAL)`);
+      }
+      if (highs.length > 0) {
+        const highUnits = highs.reduce((s, z) => s + z.units, 0);
+        const highIds   = highs.map((z) => z.id).join(', ');
+        parts.push(`${highUnits} → ${highIds} (HIGH)`);
+      }
+
+      const delta = ((gini_after ?? 0) - (gini_before ?? 0));
+      const giniStr = `Gini ${gini_before?.toFixed(3)} → ${gini_after?.toFixed(3)} (${delta >= 0 ? '+' : ''}${delta.toFixed(3)})`;
+      return parts.length > 0
+        ? `Deploying: ${parts.join(' · ')} · ${giniStr}`
+        : giniStr;
+    };
+
     // ── Chat messages ──────────────────────────────────────────────
     // Requester asking
     pushMsg(makeMsg(
       'request', requester,
-      `Urgently requesting ${amount_awarded} ${resLabel} to support active response operations.`,
-      `Submitting RFP to all available agents in the resource pool.`,
+      `Requesting ${amount_awarded} ${resLabel} for active response operations.`,
+      `RFP submitted to all available agents in the resource pool.`,
     ));
 
     // Winner responding after short delay
     setTimeout(() => {
-      const delta = ((gini_after ?? 0) - (gini_before ?? 0));
       pushMsg(makeMsg(
         'award', winner,
         `Bid accepted. Deploying ${amount_awarded} ${resLabel} immediately.`,
-        `Gini: ${gini_before?.toFixed(3)} → ${gini_after?.toFixed(3)} (${delta >= 0 ? '+' : ''}${delta.toFixed(3)}) · ${bids_count ?? 1} bid${bids_count !== 1 ? 's' : ''}`,
+        buildDeploySubtext(),
         { badge: 'AWARDED' },
       ));
     }, 350);
-  }, [pushMsg]);
+  }, [pushMsg, zones]);
 
   const onXai = useCallback((payload) => {
     const { decision_id, rationale, counterfactual } = payload;
@@ -496,7 +553,7 @@ export default function App() {
 
         {/* Sidebar */}
         <aside className="w-72 shrink-0 bg-panel-surface border-r border-panel-border flex flex-col overflow-hidden">
-          <div className="shrink-0 p-3 border-b border-panel-border">
+          <div className="shrink-0 px-3 py-2 border-b border-panel-border flex items-center">
             <Controls isSimulating={isSimulating} onTrigger={handleTrigger} onTriggerFire={handleTriggerFire} onReset={handleReset} />
           </div>
           <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
