@@ -331,3 +331,28 @@ AERIAL: dashed red/orange polyline, 2px, curved arc;
   INVARIANT: FIRE_POWER_LOSS_M (500) must equal FIRE_BANDS_M[0] (500) so the dark
   zone and the CRITICAL classification zone are always the same area.
   VERIFIED: npm run build → 0 errors. 74 modules.
+
+[2026-11-12 00:40] ML CROSS-CHECK DISPLAY —
+  Backend zone_update events now carry `ml_classification` (Random Forest trained on
+  the Nepal 2015 dataset; backend branch backend-audit-fixes). The frontend shows it
+  next to the distance-band class. The ML label never drives the zone colour.
+  - App.jsx onZoneUpdate: stores ml_classification on each zone; bootstrap and reset
+    clear it to null. mlBatchRef collects {zone_id, classification, ml} per event.
+  - App.jsx flushZoneBatch: after the zone_group message, pushes one Sensing-agent
+    chat message (badge "ML"): "ML cross-check: Random Forest agrees with distance
+    bands on N/12 zones", listing disagreeing zones as "Flagged for review".
+  - Map/ZoneCircle.jsx: popup row "ML model (Random Forest): <badge>" plus
+    "⚠ review" when it differs from the distance class; the tooltip adds "· ML: X".
+  VERIFIED: live run (backend + vite) with Playwright. Earthquake → Zone-B popup shows
+  CRITICAL / ML CRITICAL; chat shows the summary (2/12 agree for the default quake).
+  ESLint: no new errors (3 pre-existing). KNOWN ISSUE (not fixed): CARTO basemap
+  tiles now return "API KEY REQUIRED".
+
+[2026-11-12 01:05] CARTO BASEMAP KEY —
+  CARTO began requiring an API key; keyless tiles showed an "API KEY REQUIRED" watermark.
+  - constants/api.js: new MAP_TILE_URL built from VITE_CARTO_API_KEY
+    (https://basemaps.cartocdn.com/rastertiles/dark_all/{z}/{x}/{y}.png?key=…),
+    falling back to the old keyless URL when no key is set.
+  - Map/CityMap.jsx: TileLayer uses MAP_TILE_URL (URL moved out of the component per rule 3).
+  - .env (git-ignored) holds the key; .env.example documents it.
+  VERIFIED: vite + Playwright, 15/15 tile requests 200, dark map renders without watermark.

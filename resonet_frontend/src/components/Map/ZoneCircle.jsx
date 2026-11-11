@@ -83,6 +83,7 @@ export default function ZoneCircle({
     population_density = 0.5,
     classification,
     severity_score,
+    ml_classification,
     has_critical_infra,
     power_status,
     road_blocked,
@@ -155,6 +156,9 @@ export default function ZoneCircle({
         {effectiveClass && (
           <span className="ml-2 text-xs opacity-75">({effectiveClass})</span>
         )}
+        {ml_classification && (
+          <span className="ml-1 text-xs opacity-75">· ML: {ml_classification}</span>
+        )}
       </Tooltip>
 
       <Popup minWidth={200} maxWidth={260}>
@@ -168,6 +172,18 @@ export default function ZoneCircle({
             <span className={`inline-block px-2 py-0.5 rounded text-xs font-semibold text-white ${CLS_COLOURS[effectiveClass] ?? 'bg-gray-600'}`}>
               {effectiveClass}
             </span>
+          )}
+
+          {ml_classification && (
+            <div className="flex items-center gap-1.5 text-xs">
+              <span className="text-gray-400">ML model (Random Forest):</span>
+              <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-semibold text-white ${CLS_COLOURS[ml_classification] ?? 'bg-gray-600'}`}>
+                {ml_classification}
+              </span>
+              {effectiveClass && ml_classification !== effectiveClass && (
+                <span className="text-amber-400" title="Model disagrees with the distance bands — review">⚠ review</span>
+              )}
+            </div>
           )}
 
           {severity_score != null && (

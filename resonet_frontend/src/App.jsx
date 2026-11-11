@@ -92,6 +92,10 @@ export default function App() {
   const zoneBatchRef      = useRef([]);
   const zoneBatchTimerRef = useRef(null);
 
+  // ML cross-check — every zone's distance label vs the Random Forest label,
+  // summarised in one chat message when the zone batch flushes.
+  const mlBatchRef = useRef(new Map());
+
   // Power batch — stores { id, lat, lon } for every zone the backend marks power_off.
   // Filtered by distance at flush time so the message matches the map exactly.
   const powerBatchRef      = useRef([]);
@@ -144,6 +148,23 @@ export default function App() {
     if (groups.length === 0) return;
 
     pushMsg(makeMsg('zone_group', 'zone_monitor', '', null, { groups }));
+
+    // ML cross-check summary: how often the Nepal-trained Random Forest agrees
+    // with the distance bands, and which zones a human should double-check.
+    const ml = [...mlBatchRef.current.values()].filter((z) => z.ml);
+    mlBatchRef.current = new Map();
+    if (ml.length > 0) {
+      const disagree = ml.filter((z) => z.ml !== z.classification);
+      const detail = disagree.length
+        ? `Flagged for review: ${disagree.map((z) => `${z.zone_id} (model ${z.ml})`).join(', ')}.`
+        : 'No disagreements — model and distance bands match.';
+      pushMsg(makeMsg(
+        'award', 'sensing_agent',
+        `ML cross-check: Random Forest agrees with distance bands on ${ml.length - disagree.length}/${ml.length} zones.`,
+        detail,
+        { badge: 'ML' },
+      ));
+    }
   }, [pushMsg]);
 
   /* ── Power batch flush — fires after all zone_update events settle ── */
@@ -175,12 +196,13 @@ export default function App() {
 
   /* ── WebSocket handlers ───────────────────────────────────────── */
   const onZoneUpdate = useCallback((payload) => {
-    const { zone_id, lat, lon, classification, severity_score,
+    const { zone_id, lat, lon, classification, severity_score, ml_classification,
             population_density, has_critical_infra, road_blocked, power_status } = payload;
 
     setZones((prev) => prev.map((z) =>
       z.id === zone_id
         ? { ...z, classification, severity_score,
+            ml_classification: ml_classification ?? null,
             lat: lat ?? z.lat, lon: lon ?? z.lon,
             population_density: population_density ?? z.population_density,
             has_critical_infra: has_critical_infra ?? z.has_critical_infra,
@@ -201,6 +223,8 @@ export default function App() {
     clearTimeout(powerBatchTimerRef.current);
     // Flush slightly after zone batch (900 ms) so power msg appears after zone alert
     powerBatchTimerRef.current = setTimeout(flushPowerBatch, 900);
+
+    mlBatchRef.current.set(zone_id, { zone_id, classification, ml: ml_classification });
 
     // Buffer for grouped zone classification chat message
     if (['CRITICAL', 'HIGH', 'LOW'].includes(classification)) {
@@ -412,7 +436,7 @@ export default function App() {
         const sData = await sRes.json();
         setHealth(hData);
         const zonesArr = Array.isArray(sData.zones) ? sData.zones : (sData.zones?.zones ?? []);
-        setZones(zonesArr.map((z) => ({ ...z, classification: null, severity_score: null })));
+        setZones(zonesArr.map((z) => ({ ...z, classification: null, severity_score: null, ml_classification: null })));
         setAgents(sData.agents ?? {});
       } catch (err) {
         console.error('[BOOT]', err);
@@ -428,6 +452,7 @@ export default function App() {
         // Clear zone batch
         clearTimeout(zoneBatchTimerRef.current);
         zoneBatchRef.current = [];
+        mlBatchRef.current = new Map();
         // Clear power batch
         clearTimeout(powerBatchTimerRef.current);
         powerBatchRef.current = [];
@@ -440,7 +465,7 @@ export default function App() {
         fetch(ENDPOINTS.state).then((r) => r.json()).then((d) => {
           setAgents(d.agents ?? {});
           const zonesArr = Array.isArray(d.zones) ? d.zones : (d.zones?.zones ?? []);
-          setZones(zonesArr.map((z) => ({ ...z, classification: null, severity_score: null })));
+          setZones(zonesArr.map((z) => ({ ...z, classification: null, severity_score: null, ml_classification: null })));
           resolve();
         }).catch(() => {
           resolve();

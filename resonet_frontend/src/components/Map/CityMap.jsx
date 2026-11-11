@@ -12,6 +12,7 @@
 import { useState }              from 'react';
 import { MapContainer, TileLayer } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
+import { MAP_TILE_URL } from '../../constants/api';
 import ZoneCircle      from './ZoneCircle';
 import BuildingCluster from './BuildingCluster';
 import PowerOverlay    from './PowerOverlay';
@@ -20,7 +21,6 @@ import EarthquakeHalo  from './EarthquakeHalo';
 import MapLegend       from './MapLegend';
 import EmergencyRoutes from './EmergencyRoutes';
 
-const CARTO_DARK  = 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png';
 const ATTRIBUTION = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>';
 
 const CENTER = [12.9716, 77.5946];
@@ -45,7 +45,7 @@ export default function CityMap({
         style={{ width: '100%', height: '100%' }}
         attributionControl={true}
       >
-        <TileLayer url={CARTO_DARK} attribution={ATTRIBUTION} maxZoom={19} />
+        <TileLayer url={MAP_TILE_URL} attribution={ATTRIBUTION} maxZoom={19} />
 
         {/* Earthquake halo — rendered first so everything else sits on top */}
         <EarthquakeHalo epicenter={epicenter} />
