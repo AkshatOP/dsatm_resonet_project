@@ -31,6 +31,7 @@ class HospitalAgent(BaseAgent):
             priority_weight=2.0,  # hospitals have elevated base priority
         )
         self.patient_load: float = 0.0
+        self.home_zone: str = _HOSPITAL_ZONE  # used by the LIFE SAFETY OVERRIDE
 
     async def process_event(self, event: Any) -> None:
         self._log("Earthquake event received — checking capacity")
@@ -60,21 +61,23 @@ class HospitalAgent(BaseAgent):
 
     async def on_critical_zone(self, zone_status: ZoneStatus, orchestrator) -> None:
         """
-        Called by SensingAgent when Zone-B is CRITICAL.
+        Called by SensingAgent for each CRITICAL/HIGH zone that lost power.
         Power demand scales with zone severity; urgency scales with patient load.
+        The power RFP names the affected zone; the personnel RFP names the
+        hospital itself (Zone-B), since that is where extra staff are needed.
         """
         if zone_status.power_status:
             return
         # Demand is proportional to severity — harder hit = more power needed
         power_needed = round(20 + zone_status.severity_score * 60)
         urgency = round(min(1.0, 0.7 + self.patient_load * 0.3), 2)
-        self._log(f"Zone-B without power — RFP: {power_needed} units at urgency={urgency}")
+        self._log(f"{zone_status.zone_id} without power — RFP: {power_needed} units at urgency={urgency}")
         rfp = _CNP.create_rfp(
             requester_id=self.agent_id,
             resource_type="power_units",
             amount=float(power_needed),
             urgency=urgency,
-            zone_id=_HOSPITAL_ZONE,
+            zone_id=zone_status.zone_id,
         )
         await orchestrator.run_cycle(rfp)
 

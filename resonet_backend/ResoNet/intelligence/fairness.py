@@ -31,6 +31,22 @@ def compute_gini(allocations: List[float]) -> float:
     return float(np.clip(gini, 0.0, 1.0))
 
 
+def resource_totals(agents: List[AgentState]) -> List[float]:
+    """
+    Total resources per agent, for the Gini calculation.
+    Only agents that start with resources are counted: coordinators
+    (sensing, policy, XAI, rescue coordinator) always hold nothing, and
+    counting their zeros would make the city look unequal before any
+    disaster even happens.
+    """
+    import config
+    return [
+        float(sum(a.resource_pool.values()))
+        for a in agents
+        if config.AGENT_INITIAL_RESOURCES.get(a.agent_type)
+    ]
+
+
 def get_allocation_summary(agents: List[AgentState]) -> Dict[str, Dict]:
     """
     Return per-agent resource utilization metrics.

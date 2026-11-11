@@ -205,6 +205,11 @@ async def reset_simulation(request: Request) -> Dict[str, Any]:
     state.sensing_agent.city_model = new_city
     state.sensing_agent.simulator.city_model = new_city if hasattr(state.sensing_agent.simulator, "city_model") else None
     state.orchestrator.city_model = new_city
+    # Any agent holding its own city reference (e.g. the rescue coordinator,
+    # which plans routes) must also get the fresh, undamaged graph.
+    for agent in state.all_agents.values():
+        if hasattr(agent, "city_model"):
+            agent.city_model = new_city
 
     # Restore agent resources and status
     for agent_id, agent in state.all_agents.items():

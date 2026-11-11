@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import config
 from agents.base_agent import BaseAgent
-from intelligence.fairness import compute_gini
+from intelligence.fairness import compute_gini, resource_totals
 from messaging.broker import MessageBroker
 from messaging.message_types import AgentState, Bid, RFP, ZoneStatus
 
@@ -43,7 +43,7 @@ class PolicyAgent(BaseAgent):
         Returns {gini, intervention_needed, penalized_agents}.
         """
         from intelligence.fairness import get_allocation_summary
-        allocations = [sum(s.resource_pool.values()) for s in agent_states]
+        allocations = resource_totals(agent_states)
         gini = compute_gini(allocations)
         intervention_needed = gini > config.GINI_THRESHOLD
 

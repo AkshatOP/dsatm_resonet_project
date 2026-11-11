@@ -100,7 +100,8 @@ def load_nepal_dataset(values_csv, labels_csv):
 
     Input CSVs:
         train_values.csv  — building features (geo_level_2_id, has_secondary_use_health, ...)
-        train_labels.csv  — damage_grade (1–5) per building
+        train_labels.csv  — damage_grade (1–3) per building
+                            (1 = low damage, 2 = medium, 3 = almost destroyed)
 
     Output:
         X: (n_zones, 3) array — [avg_severity, avg_pop_density, has_critical_infra]
@@ -124,7 +125,9 @@ def load_nepal_dataset(values_csv, labels_csv):
     ).reset_index()
 
     # Normalise to our 3-feature space
-    zone_df["severity_score"]       = (zone_df["avg_damage"] - 1) / 4          # 1–5 → 0–1
+    # damage_grade runs 1–3 in this dataset, so (avg - 1) / 2 maps it onto
+    # the same 0–1 severity scale the live simulator produces.
+    zone_df["severity_score"]       = (zone_df["avg_damage"] - 1) / 2          # 1–3 → 0–1
     zone_df["population_density"]   = (zone_df["building_count"] /
                                         zone_df["building_count"].max())         # 0–1
     zone_df["has_critical_infra"]   = zone_df["has_health"].astype(float)

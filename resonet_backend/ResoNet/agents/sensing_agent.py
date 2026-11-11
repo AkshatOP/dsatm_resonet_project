@@ -194,21 +194,46 @@ class SensingAgent(BaseAgent):
                     zs.zone_id, rule_cls, zs.classification,
                 )
 
+        # ML cross-check: the Random Forest trained on the Nepal 2015 dataset
+        # predicts a label for every zone. It never overrides the distance
+        # label (map and backend must agree); it is logged and sent to the
+        # frontend as `ml_classification` so the two can be compared.
+        ml_classifications: Dict[str, str] = {}
+        for zs in zone_statuses:
+            try:
+                ml_classifications[zs.zone_id] = self.zone_classifier.classify_ml(zs)
+            except Exception as exc:  # a broken model must never stop the pipeline
+                _log.warning("[SENSING] ML classifier failed on %s: %s", zs.zone_id, exc)
+        if ml_classifications:
+            agree = sum(ml_classifications.get(zs.zone_id) == zs.classification for zs in zone_statuses)
+            _log.info("[SENSING] ML cross-check: model agrees with distance bands on %d/%d zones",
+                      agree, len(zone_statuses))
+
+        # LIFE SAFETY OVERRIDE: if the hospital's own zone lost power, the
+        # power grid restores it immediately — no RFP, no bidding.
+        power_agent = self.all_agents_ref.get("power_agent")
+        hospital_zone = getattr(self.all_agents_ref.get("hospital_agent"), "home_zone", None)
+        for zs in zone_statuses:
+            if power_agent and zs.zone_id == hospital_zone and not zs.power_status:
+                power_agent.reallocate_to_hospital(zs.zone_id)
+                self.city_model.set_zone_power(zs.zone_id, True)
+                zs.power_status = True
+
         self.current_zone_statuses = zone_statuses
 
         # Print zone assessment table
         _log.info("[SENSING] Zone damage assessment:")
-        _log.info("  %-8s  %-20s  %-8s  %-10s  %-7s  %-5s", "Zone", "Name", "Severity", "Class", "Roads", "Power")
-        _log.info("  " + "─" * 70)
+        _log.info("  %-8s  %-20s  %-8s  %-10s  %-7s  %-5s  %-8s", "Zone", "Name", "Severity", "Class", "Roads", "Power", "ML")
+        _log.info("  " + "─" * 80)
         zone_names = {z["id"]: z["name"] for z in config.CITY_ZONES}
         for zs in sorted(zone_statuses, key=lambda z: z.severity_score, reverse=True):
             road_str = "BLOCKED" if zs.road_blocked else "OK"
             power_str = "OFF" if not zs.power_status else "ON"
             cls_marker = {"CRITICAL": "🔴", "HIGH": "🟠", "LOW": "🟡", "SAFE": "🟢"}.get(zs.classification, "")
-            _log.info("  %-8s  %-20s  %-8.2f  %s %-8s  %-7s  %-5s",
+            _log.info("  %-8s  %-20s  %-8.2f  %s %-8s  %-7s  %-5s  %-8s",
                       zs.zone_id, zone_names.get(zs.zone_id, "?"),
                       zs.severity_score, cls_marker, zs.classification,
-                      road_str, power_str)
+                      road_str, power_str, ml_classifications.get(zs.zone_id, "-"))
 
         critical = [zs.zone_id for zs in zone_statuses if zs.classification == "CRITICAL"]
         high = [zs.zone_id for zs in zone_statuses if zs.classification == "HIGH"]
@@ -225,6 +250,7 @@ class SensingAgent(BaseAgent):
             payload["lat"] = coords.get("lat")
             payload["lon"] = coords.get("lon")
             payload["calamity_type"] = calamity_type
+            payload["ml_classification"] = ml_classifications.get(zs.zone_id)
             ws_event = WebSocketEvent(event_type="zone_update", payload=payload)
             await self.broker.broadcast(ws_event)
 

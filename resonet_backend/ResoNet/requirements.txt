@@ -11,3 +11,4 @@ google-genai
 anthropic
 python-dotenv
 dataclasses-json
+pandas  # only for training/train_zone_classifier.py --real-data

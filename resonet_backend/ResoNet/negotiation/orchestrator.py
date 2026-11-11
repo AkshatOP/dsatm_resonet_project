@@ -10,7 +10,7 @@ import uuid
 from typing import Dict, List, Optional
 
 import config
-from intelligence.fairness import compute_gini, get_allocation_summary
+from intelligence.fairness import compute_gini, get_allocation_summary, resource_totals
 from messaging.broker import MessageBroker
 from messaging.message_types import (
     AgentState, Award, Bid, NegotiationDecision, RFP, WebSocketEvent,
@@ -85,9 +85,7 @@ class NegotiationOrchestrator:
 
         # Step 3: Compute Gini before award
         agent_states = {aid: a.get_state() for aid, a in self.all_agents.items()}
-        current_resources = [
-            sum(s.resource_pool.values()) for s in agent_states.values()
-        ]
+        current_resources = resource_totals(list(agent_states.values()))
         gini_before = compute_gini(current_resources)
         logger.info("[FAIRNESS] Gini before award: %.4f  (%s)",
                     gini_before,
@@ -145,9 +143,7 @@ class NegotiationOrchestrator:
                 requester.update_resources({rfp.resource_type: amount})
 
             # Step 7: Compute Gini after award
-            updated_resources = [
-                sum(a.get_state().resource_pool.values()) for a in self.all_agents.values()
-            ]
+            updated_resources = resource_totals([a.get_state() for a in self.all_agents.values()])
             gini_after = compute_gini(updated_resources)
             delta = gini_after - gini_before
             direction = "more equal ▲" if delta < 0 else "less equal ▼"
